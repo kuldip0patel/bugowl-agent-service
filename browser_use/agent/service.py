@@ -60,13 +60,151 @@ from browser_use.telemetry.service import ProductTelemetry
 from browser_use.telemetry.views import (
 	AgentTelemetryEvent,
 )
-from browser_use.utils import check_env_variables, time_execution_async, time_execution_sync
+from browser_use.utils import check_env_variables, time_execution_async, time_execution_sync, SignalHandler
+
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, JSON, DateTime, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+from contextlib import contextmanager
+from datetime import datetime
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 SKIP_LLM_API_KEY_VERIFICATION = os.environ.get('SKIP_LLM_API_KEY_VERIFICATION', 'false').lower()[0] in 'ty1'
 
+Base = declarative_base()
+
+class AgentRun(Base):
+	__tablename__ = 'agent_runs'
+	
+	id = Column(Integer, primary_key=True)
+	task = Column(String)
+	model = Column(String)
+	model_provider = Column(String)
+	planner_llm = Column(String, nullable=True)
+	max_steps = Column(Integer)
+	max_actions_per_step = Column(Integer)
+	use_vision = Column(Boolean)
+	use_validation = Column(Boolean)
+	version = Column(String)
+	source = Column(String)
+	steps = Column(Integer)
+	total_input_tokens = Column(Integer)
+	total_duration_seconds = Column(Float)
+	success = Column(Boolean, nullable=True)
+	final_result_response = Column(String, nullable=True)
+	error_message = Column(String, nullable=True)
+	created_at = Column(DateTime, default=datetime.utcnow)
+	
+	# Relationships
+	actions = relationship("AgentAction", back_populates="run")
+	conversations = relationship("Conversation", back_populates="run")
+
+class AgentAction(Base):
+	__tablename__ = 'agent_actions'
+	
+	id = Column(Integer, primary_key=True)
+	run_id = Column(Integer, ForeignKey('agent_runs.id'))
+	step_number = Column(Integer)
+	action_type = Column(String)
+	action_params = Column(JSON)
+	error = Column(String, nullable=True)
+	url = Column(String, nullable=True)
+	
+	# Relationship
+	run = relationship("AgentRun", back_populates="actions")
+
+class Conversation(Base):
+	__tablename__ = 'conversations'
+	
+	id = Column(Integer, primary_key=True)
+	run_id = Column(Integer, ForeignKey('agent_runs.id'))
+	step_number = Column(Integer)
+	message_type = Column(String)  # 'system', 'human', 'ai'
+	content = Column(String)
+	created_at = Column(DateTime, default=datetime.utcnow)
+	
+	# Relationship
+	run = relationship("AgentRun", back_populates="conversations")
+
+class DatabaseService:
+	def __init__(self, db_url):
+		self.engine = create_engine(db_url)
+		Base.metadata.create_all(self.engine)
+		self.Session = sessionmaker(bind=self.engine)
+	
+	@contextmanager
+	def session_scope(self):
+		session = self.Session()
+		try:
+			yield session
+			session.commit()
+		except Exception:
+			session.rollback()
+			raise
+		finally:
+			session.close()
+	
+	def save_agent_run(self, telemetry_event, history):
+		with self.session_scope() as session:
+			# Create agent run record
+			run = AgentRun(
+				task=telemetry_event.task,
+				model=telemetry_event.model,
+				model_provider=telemetry_event.model_provider,
+				planner_llm=telemetry_event.planner_llm,
+				max_steps=telemetry_event.max_steps,
+				max_actions_per_step=telemetry_event.max_actions_per_step,
+				use_vision=telemetry_event.use_vision,
+				use_validation=telemetry_event.use_validation,
+				version=telemetry_event.version,
+				source=telemetry_event.source,
+				steps=telemetry_event.steps,
+				total_input_tokens=telemetry_event.total_input_tokens,
+				total_duration_seconds=telemetry_event.total_duration_seconds,
+				success=telemetry_event.success,
+				final_result_response=telemetry_event.final_result_response,
+				error_message=telemetry_event.error_message
+			)
+			session.add(run)
+			session.flush()  # Get the run ID
+			
+			# Save actions
+			for step_num, (actions, url) in enumerate(zip(telemetry_event.action_history, telemetry_event.urls_visited)):
+				if actions:
+					for action in actions:
+						action_type = list(action.keys())[0]
+						agent_action = AgentAction(
+							run_id=run.id,
+							step_number=step_num,
+							action_type=action_type,
+							action_params=action[action_type],
+							url=url
+						)
+						session.add(agent_action)
+			
+			# Save conversations
+			for step_num, history_item in enumerate(history.history):
+				if history_item.model_output:
+					# Save AI message
+					conversation = Conversation(
+						run_id=run.id,
+						step_number=step_num,
+						message_type='ai',
+						content=str(history_item.model_output)
+					)
+					session.add(conversation)
+				
+				# Save state message
+				if history_item.state:
+					conversation = Conversation(
+						run_id=run.id,
+						step_number=step_num,
+						message_type='system',
+						content=f"URL: {history_item.state.url}, Title: {history_item.state.title}"
+					)
+					session.add(conversation)
 
 def log_response(response: AgentOutput) -> None:
 	"""Utility function to log the model's response."""
@@ -154,6 +292,7 @@ class Agent(Generic[Context]):
 		enable_memory: bool = True,
 		memory_config: MemoryConfig | None = None,
 		source: str | None = None,
+		db_service: DatabaseService = None,
 	):
 		if page_extraction_llm is None:
 			page_extraction_llm = llm
@@ -163,6 +302,7 @@ class Agent(Generic[Context]):
 		self.llm = llm
 		self.controller = controller
 		self.sensitive_data = sensitive_data
+		self.db_service = db_service
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -323,6 +463,11 @@ class Agent(Generic[Context]):
 		if self.settings.save_conversation_path:
 			logger.info(f'Saving conversation to {self.settings.save_conversation_path}')
 
+		self.db_service = db_service
+		self._is_initialized = False
+		self._signal_handler = None
+		self._is_final_task = False
+
 	def _set_message_context(self) -> str | None:
 		if self.tool_calling_method == 'raw':
 			# For raw tool calling, only include actions with no filters initially
@@ -416,7 +561,8 @@ class Agent(Generic[Context]):
 		else:
 			return tool_calling_method
 
-	def add_new_task(self, new_task: str) -> None:
+	def add_new_task(self, new_task: str, is_final_task:False) -> None:
+		self._is_final_task = is_final_task
 		self._message_manager.add_new_task(new_task)
 
 	async def _raise_if_stopped_or_paused(self) -> None:
@@ -434,7 +580,7 @@ class Agent(Generic[Context]):
 	@time_execution_async('--step (agent)')
 	async def step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Execute one step of the task"""
-		logger.info(f'📍 Step {self.state.n_steps}')
+		logger.info(f'📍 Step {self.state.n_steps} for {self._message_manager.task}')
 		state = None
 		model_output = None
 		result: list[ActionResult] = []
@@ -697,6 +843,7 @@ class Agent(Generic[Context]):
 			logger.debug(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			try:
 				output = self.llm.invoke(input_messages)
+				#print(f"response for {self.tool_calling_method} : {output}")
 				response = {'raw': output, 'parsed': None}
 			except Exception as e:
 				logger.error(f'Failed to invoke model: {str(e)}')
@@ -715,6 +862,7 @@ class Agent(Generic[Context]):
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True)
 			try:
 				response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
+				#print(f"response for {self.tool_calling_method} : {response} ")
 				parsed: AgentOutput | None = response['parsed']
 
 			except Exception as e:
@@ -722,10 +870,10 @@ class Agent(Generic[Context]):
 				raise LLMException(401, 'LLM API call failed') from e
 
 		else:
-			logger.debug(f'Using {self.tool_calling_method} for {self.chat_model_library}')
+			logger.info(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True, method=self.tool_calling_method)
 			response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
-
+			#print(f"response for ELSE {self.tool_calling_method} : {response} ")
 		# Handle tool call responses
 		if response.get('parsing_error') and 'raw' in response:
 			raw_msg = response['raw']
@@ -794,7 +942,10 @@ class Agent(Generic[Context]):
 			else:
 				# Append None or [] if a step had no actions or no model output
 				action_history_data.append(None)
-
+		
+		# Save to database if db_service is provided
+			if self.db_service:
+				self.db_service.save_agent_run(event, self.state.history)
 		final_res = self.state.history.final_result()
 		final_result_str = json.dumps(final_res) if final_res is not None else None
 
@@ -822,6 +973,31 @@ class Agent(Generic[Context]):
 			)
 		)
 
+		if self.db_service:
+			self.db_service.save_agent_run(self.telemetry.capture(
+				AgentTelemetryEvent(
+					task=self.task,
+					model=self.model_name,
+					model_provider=self.chat_model_library,
+					planner_llm=self.planner_model_name,
+					max_steps=max_steps,
+					max_actions_per_step=self.settings.max_actions_per_step,
+					use_vision=self.settings.use_vision,
+					use_validation=self.settings.validate_output,
+					version=self.version,
+					source=self.source,
+					action_errors=self.state.history.errors(),
+					action_history=action_history_data,
+					urls_visited=self.state.history.urls(),
+					steps=self.state.n_steps,
+					total_input_tokens=self.state.history.total_input_tokens(),
+					total_duration_seconds=self.state.history.total_duration_seconds(),
+					success=self.state.history.is_successful(),
+					final_result_response=final_result_str,
+					error_message=agent_run_error,
+				)
+			), self.state.history)
+
 	async def take_step(self) -> tuple[bool, bool]:
 		"""Take a step
 
@@ -830,6 +1006,8 @@ class Agent(Generic[Context]):
 		"""
 		await self.step()
 
+		if not self.state.history.is_successful:
+			return True, False
 		if self.state.history.is_done():
 			if self.settings.validate_output:
 				if not await self._validate_output():
@@ -845,158 +1023,97 @@ class Agent(Generic[Context]):
 
 		return False, False
 
-	# @observe(name='agent.run', ignore_output=True)
+	async def initialize_run(self) -> None:
+		"""Initialize the run environment once"""
+		if self._is_initialized:
+			return
+			
+		loop = asyncio.get_event_loop()
+		self._force_exit_telemetry_logged = False
+		
+		# Set up signal handler once
+		self._signal_handler = SignalHandler(
+			loop=loop,
+			pause_callback=self.pause,
+			resume_callback=self.resume,
+			custom_exit_callback=lambda: self._log_agent_event(max_steps=100, agent_run_error='SIGINT: Cancelled by user'),
+			exit_on_second_int=True,
+		)
+		self._signal_handler.register()
+		
+		# Execute initial actions if provided
+		if self.initial_actions:
+			result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
+			self.state.last_result = result
+			
+		self._is_initialized = True
+	
+	async def execute_step(self, step_info: AgentStepInfo | None = None) -> tuple[bool, bool]:
+		"""Execute a single step of the task"""
+		if not self._is_initialized:
+			await self.initialize_run()
+			
+		return await self.take_step()
+	
+	async def cleanup_run(self) -> None:
+		"""Clean up after all steps are done"""
+		if not self._is_initialized:
+			return
+			
+		if self._signal_handler:
+			self._signal_handler.unregister()
+			
+		try:
+			self._log_agent_event(max_steps=100)
+		except Exception as log_e:
+			logger.error(f'Failed to log telemetry event: {log_e}', exc_info=True)
+			
+		await self.close()
+		self._is_initialized = False
+	
+	# Modified run method that uses the new structure
 	@time_execution_async('--run (agent)')
 	async def run(
 		self, max_steps: int = 100, on_step_start: AgentHookFunc | None = None, on_step_end: AgentHookFunc | None = None
 	) -> AgentHistoryList:
 		"""Execute the task with maximum number of steps"""
-
-		loop = asyncio.get_event_loop()
-		agent_run_error: str | None = None  # Initialize error tracking variable
-		self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
-
-		# Set up the Ctrl+C signal handler with callbacks specific to this agent
-		from browser_use.utils import SignalHandler
-
-		# Define the custom exit callback function for second CTRL+C
-		def on_force_exit_log_telemetry():
-			self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
-			# NEW: Call the flush method on the telemetry instance
-			if hasattr(self, 'telemetry') and self.telemetry:
-				self.telemetry.flush()
-			self._force_exit_telemetry_logged = True  # Set the flag
-
-		signal_handler = SignalHandler(
-			loop=loop,
-			pause_callback=self.pause,
-			resume_callback=self.resume,
-			custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
-			exit_on_second_int=True,
-		)
-		signal_handler.register()
-
 		try:
-			self._log_agent_run()
-
-			# Execute initial actions if provided
-			if self.initial_actions:
-				result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
-				self.state.last_result = result
-
+			await self.initialize_run()
+			
 			for step in range(max_steps):
-				# Check if waiting for user input after Ctrl+C
 				if self.state.paused:
-					signal_handler.wait_for_resume()
-					signal_handler.reset()
-
-				# Check if we should stop due to too many failures
+					self._signal_handler.wait_for_resume()
+					self._signal_handler.reset()
+					
 				if self.state.consecutive_failures >= self.settings.max_failures:
 					logger.error(f'❌ Stopping due to {self.settings.max_failures} consecutive failures')
-					agent_run_error = f'Stopped due to {self.settings.max_failures} consecutive failures'
 					break
-
-				# Check control flags before each step
+					
 				if self.state.stopped:
 					logger.info('Agent stopped')
-					agent_run_error = 'Agent stopped programmatically'
 					break
-
-				while self.state.paused:
-					await asyncio.sleep(0.2)  # Small delay to prevent CPU spinning
-					if self.state.stopped:  # Allow stopping while paused
-						agent_run_error = 'Agent stopped programmatically while paused'
-						break
-
+					
 				if on_step_start is not None:
+					print(on_step_start)
 					await on_step_start(self)
-
+					
 				step_info = AgentStepInfo(step_number=step, max_steps=max_steps)
-				await self.step(step_info)
-
+				is_done, is_valid = await self.execute_step(step_info)
+					
 				if on_step_end is not None:
 					await on_step_end(self)
-
-				if self.state.history.is_done():
+					
+				if is_done:
 					if self.settings.validate_output and step < max_steps - 1:
-						if not await self._validate_output():
+						if not is_valid:
 							continue
-
-					await self.log_completion()
 					break
-			else:
-				agent_run_error = 'Failed to complete task in maximum steps'
-
-				self.state.history.history.append(
-					AgentHistory(
-						model_output=None,
-						result=[ActionResult(error=agent_run_error, include_in_memory=True)],
-						state=BrowserStateHistory(
-							url='',
-							title='',
-							tabs=[],
-							interacted_element=[],
-							screenshot=None,
-						),
-						metadata=None,
-					)
-				)
-
-				logger.info(f'❌ {agent_run_error}')
-
+					
 			return self.state.history
-
-		except KeyboardInterrupt:
-			# Already handled by our signal handler, but catch any direct KeyboardInterrupt as well
-			logger.info('Got KeyboardInterrupt during execution, returning current history')
-			agent_run_error = 'KeyboardInterrupt'
-			return self.state.history
-
-		except Exception as e:
-			logger.error(f'Agent run failed with exception: {e}', exc_info=True)
-			agent_run_error = str(e)
-			raise e
-
+			
 		finally:
-			# Unregister signal handlers before cleanup
-			signal_handler.unregister()
-
-			if not self._force_exit_telemetry_logged:  # MODIFIED: Check the flag
-				try:
-					self._log_agent_event(max_steps=max_steps, agent_run_error=agent_run_error)
-					logger.info('Agent run telemetry logged.')
-				except Exception as log_e:  # Catch potential errors during logging itself
-					logger.error(f'Failed to log telemetry event: {log_e}', exc_info=True)
-			else:
-				# ADDED: Info message when custom telemetry for SIGINT was already logged
-				logger.info('Telemetry for force exit (SIGINT) was logged by custom exit callback.')
-
-			if self.settings.save_playwright_script_path:
-				logger.info(
-					f'Agent run finished. Attempting to save Playwright script to: {self.settings.save_playwright_script_path}'
-				)
-				try:
-					# Extract sensitive data keys if sensitive_data is provided
-					keys = list(self.sensitive_data.keys()) if self.sensitive_data else None
-					# Pass browser and context config to the saving method
-					self.state.history.save_as_playwright_script(
-						self.settings.save_playwright_script_path,
-						sensitive_data_keys=keys,
-						browser_config=self.browser.config,
-						context_config=self.browser_context.config,
-					)
-				except Exception as script_gen_err:
-					# Log any error during script generation/saving
-					logger.error(f'Failed to save Playwright script: {script_gen_err}', exc_info=True)
-
-			await self.close()
-
-			if self.settings.generate_gif:
-				output_path: str = 'agent_history.gif'
-				if isinstance(self.settings.generate_gif, str):
-					output_path = self.settings.generate_gif
-
-				create_history_gif(task=self.task, history=self.state.history, output_path=output_path)
+			if self._is_final_task:
+				await self.cleanup_run()
 
 	# @observe(name='controller.multi_act')
 	@time_execution_async('--multi-act (agent)')
@@ -1073,7 +1190,7 @@ class Agent(Generic[Context]):
 		system_msg = (
 			f'You are a validator of an agent who interacts with a browser. '
 			f'Validate if the output of last action is what the user wanted and if the task is completed. '
-			f'If the task is unclear defined, you can let it pass. But if something is missing or the image does not show what was requested dont let it pass. '
+			f'If the task is unclear defined, you should not let it pass. Furthermore, If something is missing or the image does not show what was requested dont let it pass. '
 			f'Try to understand the page and help the model with suggestions like scroll, do x, ... to get the solution right. '
 			f'Task to validate: {self.task}. Return a JSON object with 2 keys: is_valid and reason. '
 			f'is_valid is a boolean that indicates if the output is correct. '
@@ -1370,7 +1487,9 @@ class Agent(Generic[Context]):
 
 		# Get all standard actions (no filter) and page-specific actions
 		standard_actions = self.controller.registry.get_prompt_description()  # No page = system prompt actions
+		print(f"standard_actions : {standard_actions}")
 		page_actions = self.controller.registry.get_prompt_description(page)  # Page-specific actions
+		print(f"page_actions : {page_actions}")
 
 		# Combine both for the planner
 		all_actions = standard_actions
@@ -1385,6 +1504,7 @@ class Agent(Generic[Context]):
 			),
 			*self._message_manager.get_messages()[1:],  # Use full message history except the first
 		]
+		print(f"planner_messages: {planner_messages}")
 
 		if not self.settings.use_vision_for_planner and self.settings.use_vision:
 			last_state_message: HumanMessage = planner_messages[-1]

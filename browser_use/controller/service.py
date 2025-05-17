@@ -4,11 +4,11 @@ import json
 import logging
 import re
 from typing import Generic, TypeVar, cast
-
+import traceback
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import PromptTemplate
 from playwright.async_api import ElementHandle, Page
-
+import time
 # from lmnr.sdk.laminar import Laminar
 from pydantic import BaseModel
 
@@ -117,6 +117,10 @@ class Controller(Generic[Context]):
 		# Element Interaction Actions
 		@self.registry.action('Click element by index', param_model=ClickElementAction)
 		async def click_element_by_index(params: ClickElementAction, browser: BrowserContext):
+			# print(f"attempt {attempt_count}, last_result: {last_result}")
+			# if attempt_count > 2:
+			# 	return last_result
+			
 			session = await browser.get_session()
 
 			if params.index not in await browser.get_selector_map():
@@ -149,7 +153,13 @@ class Controller(Generic[Context]):
 					await browser.switch_to_tab(-1)
 				return ActionResult(extracted_content=msg, include_in_memory=True)
 			except Exception as e:
+				logger.error(traceback.format_exc())
 				logger.warning(f'Element not clickable with index {params.index} - most likely the page changed')
+				# Wait for some seconds and try again.
+				# attempt_count = attempt_count + 1
+				# time.sleep(5)
+				# last_result=ActionResult(error=str(e), success=False)
+				# return click_element_by_index(params=params ,browser=browser,last_result=last_result, attempt_count=attempt_count )
 				return ActionResult(error=str(e))
 
 		@self.registry.action(
@@ -478,7 +488,7 @@ class Controller(Generic[Context]):
 										tagName: select.tagName,
 										optionCount: select.options.length,
 										currentValue: select.value,
-										availableOptions: Array.from(select.options).map(o => o.text.trim())
+										availableOptions: Array.from(select.options).map(o => o.text ? o.text.trim() : '')
 									};
 								} catch (e) {
 									return {error: e.toString(), found: false};
