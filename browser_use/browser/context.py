@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
+import traceback
 import anyio
 from playwright._impl._errors import TimeoutError
 from playwright.async_api import Browser as PlaywrightBrowser
@@ -1703,6 +1703,7 @@ class BrowserContext:
 		"""
 		Optimized method to click an element using xpath.
 		"""
+		logger.info(f"_click_element_node?: {element_node}")
 		page = await self.get_agent_current_page()
 
 		try:
@@ -1711,13 +1712,14 @@ class BrowserContext:
 			# 	await self._update_state(focus_element=element_node.highlight_index)
 
 			element_handle = await self.get_locate_element(element_node)
-
+			#logger.info(f"_click_element_node? {element_handle}")
+			
 			if element_handle is None:
 				raise Exception(f'Element: {repr(element_node)} not found')
 
 			async def perform_click(click_func):
 				"""Performs the actual click, handling both download
-				and navigation scenarios."""
+				and navigation scenarios with retry logic."""
 				if self.config.save_downloads_path:
 					try:
 						# Try short-timeout expect_download to detect a file download has been been triggered
@@ -1738,17 +1740,72 @@ class BrowserContext:
 						await self._check_and_handle_navigation(page)
 				else:
 					# Standard click logic if no download is expected
-					await click_func()
-					await page.wait_for_load_state()
-					await self._check_and_handle_navigation(page)
+					max_retries = 3
+					retry_delay = 1000  # Start with 1 second delay
+					
+					for attempt in range(max_retries):
+						try:
+							# First try the click without waiting for navigation
+							await click_func()
+							
+							# Wait for network activity to settle
+							try:
+								# Wait for network to be idle
+								await page.wait_for_load_state('networkidle', timeout=5000)
+								
+								# Additional check for any pending network requests
+								pending_requests = await page.evaluate("""() => {
+									const entries = performance.getEntriesByType('resource');
+									return entries.filter(e => !e.responseEnd).length;
+								}""")
+								
+								if pending_requests > 0:
+									logger.debug(f"Waiting for {pending_requests} pending network requests to complete")
+									await page.wait_for_timeout(1000)  # Give a bit more time for requests to complete
+							except Exception as e:
+								logger.debug(f"Network wait error (non-critical): {str(e)}")
+							
+							# Then check if navigation occurred
+							try:
+								# Use a shorter timeout for navigation check
+								async with page.expect_navigation(timeout=5000):
+									pass  # Navigation already happened
+							except TimeoutError:
+								# No navigation occurred, which is fine
+								logger.debug("Click completed without navigation")
+							
+							break  # If successful, break the retry loop
+							
+						except TimeoutError as e:
+							logger.error(traceback.format_exc())
+							if attempt < max_retries - 1:  # If not the last attempt
+								logger.warning(f"Click attempt {attempt + 1} timed out, retrying in {retry_delay/1000} seconds...")
+								await page.wait_for_timeout(retry_delay)
+								retry_delay *= 2  # Exponential backoff
+							else:
+								logger.warning("All click attempts timed out - continuing execution")
+								await click_func()
+						except Exception as e:
+							logger.warning(f"Error during click: {str(e)}")
+							if attempt < max_retries - 1:
+								logger.warning(f"Retrying click in {retry_delay/1000} seconds...")
+								await page.wait_for_timeout(retry_delay)
+								retry_delay *= 2
+							else:
+								raise
+						
+						await self._check_and_handle_navigation(page)
 
 			try:
-				return await perform_click(lambda: element_handle.click(timeout=1500))
+				return await perform_click(lambda: element_handle.click(timeout=5000))
 			except URLNotAllowedError as e:
 				raise e
 			except Exception:
+				logging.error(traceback.format_exc())
 				try:
-					return await perform_click(lambda: page.evaluate('(el) => el.click()', element_handle))
+					logger.info(f"perform_click() failed, waiting for 3 seconds and trying again")
+					await page.wait_for_timeout(3000)
+					# return await perform_click(lambda: page.evaluate('(el) => el.click()', element_handle))
 				except URLNotAllowedError as e:
 					raise e
 				except Exception as e:

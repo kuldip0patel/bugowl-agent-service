@@ -8,7 +8,7 @@ import argparse
 load_dotenv()
 from browser_use import BrowserConfig, Browser, BrowserContextConfig
 from browser_use.browser.context import BrowserContext
-
+import json
 
 def parse_args():
     parser = argparse.ArgumentParser(description='UI Automation Agent')
@@ -51,21 +51,21 @@ async def run_tasks(tasks: list[str]):
     """
     llm = ChatOpenAI(model="gpt-4o")
 
-    run_together = False
-    tasks_list = []
-    if run_together:
-        for i in range(1, len(tasks) + 1):
-            tasks[i-1] = f"STEP {i}: {tasks[i-1]}"
-
-        tasks_list = " \n\n ".join(tasks)
-        print(f"\n OUR task list: {tasks_list}")
+    run_together = True
+    # tasks_list = []
+    # if run_together:
+        # for i in range(1, len(tasks) + 1):
+        #     tasks[i-1] = f"STEP {i}: {tasks[i-1]}"
+        # tasks_list = " \n\n ".join(tasks)
+        # print(f"\n OUR task list: {tasks_list}")
 
 # Basic configuration
-    context_config = BrowserContextConfig( 
-    highlight_elements=False,
-    save_recording_path="videos/",
-    window_width=1920,  # or your desired width
-    window_height=1080,  # or your desired height
+    context_config = BrowserContextConfig(
+        highlight_elements=False,
+        save_recording_path="videos/",
+        window_width=1920,
+        window_height=1080,
+        # record_video_format="mp4"  # or "mov" # default=webm is the most compressed and optimised for web recordings.
     )
 
     config = BrowserConfig(
@@ -87,19 +87,24 @@ async def run_tasks(tasks: list[str]):
     """)
     
     print("BROWSER OPENED ALREADY?")
+    sensitive_data = {"baya_password": "Baya@1234"}
     if run_together:
         agent = Agent(
-            task=tasks_list,
+            tasks=tasks,
             llm=llm,
             browser=browser,
             browser_context=browser_context,
             enable_memory=True,
             save_conversation_path="logs/conversation",  # Save chat logs
-            use_vision=True
+            use_vision=True,
+            sensitive_data=sensitive_data
         )
         history = await agent.run()
         output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
         print(f"Running all tasks status : {output}")
+        for t, s in agent.tasks_result:
+            output = '✅ SUCCESSFUL' if s else '❌ FAILED!'
+            print(f" TASK: {t} : {output} ")
     else:
         agent = None
         results = []
@@ -115,6 +120,7 @@ async def run_tasks(tasks: list[str]):
                     enable_memory=True,
                     use_vision=True,
                     save_conversation_path="logs/conversation",  # Save chat logs
+                    generate_gif=True
                 )
             else:
                 is_final_task = True if count == len(task) else False

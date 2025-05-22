@@ -1,0 +1,8 @@
+visit https://www.makemytrip.com/
+close the pop up
+select from airport as Ahmedabad
+select to airport as Chennai
+select Departure date as 10th June 2025
+select Return date as 20th June 2025
+Click on Search button
+Select the first flight from the results

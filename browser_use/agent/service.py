@@ -10,7 +10,6 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Generic, TypeVar
-
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -18,10 +17,10 @@ from langchain_core.messages import (
 	HumanMessage,
 	SystemMessage,
 )
-
+import traceback
 # from lmnr.sdk.decorators import observe
 from pydantic import BaseModel, ValidationError
-
+from browser_use.utils import save_failure_screenshot
 from browser_use.agent.gif import create_history_gif
 from browser_use.agent.memory.service import Memory
 from browser_use.agent.memory.views import MemoryConfig
@@ -67,6 +66,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from contextlib import contextmanager
 from datetime import datetime
+import base64
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ class Agent(Generic[Context]):
 	@time_execution_sync('--init (agent)')
 	def __init__(
 		self,
-		task: str,
+		tasks: list[str],
 		llm: BaseChatModel,
 		# Optional parameters
 		browser: Browser | None = None,
@@ -298,7 +298,8 @@ class Agent(Generic[Context]):
 			page_extraction_llm = llm
 
 		# Core components
-		self.task = task
+		self.tasks = tasks
+		self.tasks_result = []
 		self.llm = llm
 		self.controller = controller
 		self.sensitive_data = sensitive_data
@@ -329,17 +330,25 @@ class Agent(Generic[Context]):
 			extend_planner_system_message=extend_planner_system_message,
 		)
 
+		logger.info("MEMORY")
 		# Memory settings
 		self.enable_memory = enable_memory
 		self.memory_config = memory_config
 
+		logger.info("STATE")
 		# Initialize state
 		self.state = injected_agent_state or AgentState()
 
+		logger.info("action")
+
 		# Action setup
 		self._setup_action_models()
+		logger.info("browser version")
 		self._set_browser_use_version_and_source(source)
+		logger.info("INITIAL action")
 		self.initial_actions = self._convert_initial_actions(initial_actions) if initial_actions else None
+
+		logger.info("model")
 
 		# Model setup
 		self._set_model_names()
@@ -385,8 +394,9 @@ class Agent(Generic[Context]):
 
 		# Initialize message manager with state
 		# Initial system prompt with all actions - will be updated during each step
+		task_str = json.dumps({'tasks': tasks})
 		self._message_manager = MessageManager(
-			task=task,
+			task=task_str,
 			system_message=SystemPrompt(
 				action_description=self.unfiltered_actions,
 				max_actions_per_step=self.settings.max_actions_per_step,
@@ -482,13 +492,14 @@ class Agent(Generic[Context]):
 		try:
 			# First check for repository-specific files
 			repo_files = ['.git', 'README.md', 'docs', 'examples']
+			# print(repo_files)
 			package_root = Path(__file__).parent.parent.parent
+			# print(package_root)
 
 			# If all of these files/dirs exist, it's likely from git
 			if all(Path(package_root / file).exists() for file in repo_files):
 				try:
 					import subprocess
-
 					version = subprocess.check_output(['git', 'describe', '--tags']).decode('utf-8').strip()
 				except Exception:
 					version = 'unknown'
@@ -500,11 +511,12 @@ class Agent(Generic[Context]):
 				version = version('browser-use')
 				source = 'pip'
 		except Exception:
+			logger.error(traceback.format_exc())
 			version = 'unknown'
 			source = 'unknown'
 		if source_override is not None:
 			source = source_override
-		logger.debug(f'Version: {version}, Source: {source}')
+		logger.info(f'Version: {version}, Source: {source}')
 		self.version = version
 		self.source = source
 
@@ -580,7 +592,7 @@ class Agent(Generic[Context]):
 	@time_execution_async('--step (agent)')
 	async def step(self, step_info: AgentStepInfo | None = None) -> None:
 		"""Execute one step of the task"""
-		logger.info(f'📍 Step {self.state.n_steps} for {self._message_manager.task}')
+		logger.info(f'📍 Step {self.state.n_steps}') # for {self._message_manager.task}')
 		state = None
 		model_output = None
 		result: list[ActionResult] = []
@@ -728,6 +740,7 @@ class Agent(Generic[Context]):
 			self.state.last_result = [ActionResult(error='The agent was paused with Ctrl+C', include_in_memory=False)]
 			raise InterruptedError('Step cancelled by user')
 		except Exception as e:
+			logger.error(traceback.format_exc())
 			result = await self._handle_step_error(e)
 			self.state.last_result = result
 
@@ -783,7 +796,7 @@ class Agent(Generic[Context]):
 			)
 
 			if isinstance(error, RATE_LIMIT_ERRORS):
-				logger.warning(f'{prefix}{error_msg}')
+				logger.warning(f'{prefix} {error_msg}')
 				await asyncio.sleep(self.settings.retry_delay)
 			else:
 				logger.error(f'{prefix}{error_msg}')
@@ -843,7 +856,7 @@ class Agent(Generic[Context]):
 			logger.debug(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			try:
 				output = self.llm.invoke(input_messages)
-				#print(f"response for {self.tool_calling_method} : {output}")
+				print(f"response for {self.tool_calling_method} : {output}")
 				response = {'raw': output, 'parsed': None}
 			except Exception as e:
 				logger.error(f'Failed to invoke model: {str(e)}')
@@ -862,7 +875,7 @@ class Agent(Generic[Context]):
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True)
 			try:
 				response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
-				#print(f"response for {self.tool_calling_method} : {response} ")
+				print(f"response for {self.tool_calling_method} : {response} ")
 				parsed: AgentOutput | None = response['parsed']
 
 			except Exception as e:
@@ -873,7 +886,6 @@ class Agent(Generic[Context]):
 			logger.info(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True, method=self.tool_calling_method)
 			response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
-			#print(f"response for ELSE {self.tool_calling_method} : {response} ")
 		# Handle tool call responses
 		if response.get('parsing_error') and 'raw' in response:
 			raw_msg = response['raw']
@@ -1006,8 +1018,21 @@ class Agent(Generic[Context]):
 		"""
 		await self.step()
 
+		#print(f"HISTORY: {self.state.history}")
 		if not self.state.history.is_successful:
+			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
 			return True, False
+		
+		#If error in action, then stop
+		if self.state.last_result[-1].error:
+			logger.error(f"LAST STEP ERROR: {self.state.last_result[-1].error}")
+			if "rate limit" in self.state.last_result[-1].error.lower():
+				logger.warning("Rate limit error detected, waiting and retrying...")
+				await asyncio.sleep(self.settings.retry_delay)
+				return await self.take_step()
+			else:
+				return True, False
+		
 		if self.state.history.is_done():
 			if self.settings.validate_output:
 				if not await self._validate_output():
@@ -1079,7 +1104,8 @@ class Agent(Generic[Context]):
 		"""Execute the task with maximum number of steps"""
 		try:
 			await self.initialize_run()
-			
+			last_completed_task_number = 0
+			current_completed_task_number = 0
 			for step in range(max_steps):
 				if self.state.paused:
 					self._signal_handler.wait_for_resume()
@@ -1099,18 +1125,46 @@ class Agent(Generic[Context]):
 					
 				step_info = AgentStepInfo(step_number=step, max_steps=max_steps)
 				is_done, is_valid = await self.execute_step(step_info)
+				model_output = self.state.history.model_outputs()
+				if model_output:
+					current_completed_task_number = model_output[-1].last_completed_task_number
+					if(current_completed_task_number > last_completed_task_number):
+						logger.info(f"TASK {current_completed_task_number} is COMPLETE #########")
+						last_completed_task_number = current_completed_task_number
+					if model_output[-1].current_state.evaluation_previous_goal.startswith('Failed'):
+						logger.error(f"STEP failed: {step_info}. with evaluation_previous_goal: {model_output[-1].current_state.evaluation_previous_goal} FAILED TASK NUMBER :{current_completed_task_number+1} ")
+						
+						# Take a screenshot of the failed state
+						await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)						
+						
+						break
+
 					
+				if self.state.last_result[-1].error:
+					logger.error(f"STEP failed: {step_info}. with error: {self.state.last_result[-1].error} FAILED TASK NUMBER :{current_completed_task_number+1} ")
+					# Take a screenshot of the failed state
+					await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)						
+					#self.pause()
+					break
+
 				if on_step_end is not None:
 					await on_step_end(self)
-					
+
 				if is_done:
 					if self.settings.validate_output and step < max_steps - 1:
 						if not is_valid:
 							continue
+					logger.info(f"current_completed_task_number: {current_completed_task_number}, len(self.tasks) {len(self.tasks)}")
+					# if current_completed_task_number != len(self.tasks)-1:
+					# 	logger.error(f"❌❌❌ SOMETHING IS WRONG, Received DONE before completing all tasks ❌❌❌")
 					break
-					
+			for i in range(current_completed_task_number):
+				self.tasks_result.append((self.tasks[i], True))
+			if len(self.tasks_result) < (len(self.tasks) - 1):# Add next one as failed task, if it is not the last one
+				self.tasks_result.append((self.tasks[len(self.tasks_result)], False))
+			total_tokens = self.state.history.total_input_tokens()
+			logger.info(f'📝 $$$$$ Total input tokens used (approximate): {total_tokens}')
 			return self.state.history
-			
 		finally:
 			if self._is_final_task:
 				await self.cleanup_run()
@@ -1153,7 +1207,6 @@ class Agent(Generic[Context]):
 					logger.info(msg)
 					results.append(ActionResult(extracted_content=msg, include_in_memory=True))
 					break
-
 			try:
 				await self._raise_if_stopped_or_paused()
 
@@ -1170,10 +1223,16 @@ class Agent(Generic[Context]):
 
 				logger.debug(f'Executed action {i + 1} / {len(actions)}')
 				if results[-1].is_done or results[-1].error or i == len(actions) - 1:
+					# logger.error(f"ACTION ERROR: {results[-1]}")
 					break
 
 				await asyncio.sleep(self.browser_context.config.wait_between_actions)
 				# hash all elements. if it is a subset of cached_state its fine - else break (new elements on page)
+				
+				#IF ANY ACTION FAILS, BREAK and DO NOT MOVE FURTHER.
+				if result.error:
+					logger.info(f"Action {action} failed with error: {result.error}")
+					break
 
 			except asyncio.CancelledError:
 				# Gracefully handle task cancellation

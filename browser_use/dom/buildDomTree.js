@@ -4,9 +4,10 @@
     focusHighlightIndex: -1,
     viewportExpansion: 0,
     debugMode: false,
+    fullTree: true,
   }
 ) => {
-  const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
+  const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode, fullTree } = args;
   let highlightIndex = 0; // Reset highlight index
 
   // Add timing stack to handle recursion
@@ -601,6 +602,8 @@
   // Helper function to check if element is accepted
   function isElementAccepted(element) {
     if (!element || !element.tagName) return false;
+    
+    if (fullTree) return true; // Accept all elements when fullTree is true
 
     // Always accept body and common container elements
     const alwaysAccept = new Set([
@@ -627,6 +630,8 @@
    * Checks if an element is visible.
    */
   function isElementVisible(element) {
+    if (fullTree) return true; // Consider all elements visible when fullTree is true
+
     const style = getCachedComputedStyle(element);
     return (
       element.offsetWidth > 0 &&

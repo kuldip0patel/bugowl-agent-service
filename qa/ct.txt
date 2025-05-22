@@ -1,0 +1,8 @@
+go to easemytrip.com
+Enter "Hyderabad" in From
+Enter "Dubai" in To
+Select 2 adults
+Departure Date 9th June
+Return Date 20th June
+Click "Search"
+Book the first flight from results

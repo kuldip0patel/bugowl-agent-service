@@ -8,6 +8,8 @@ from collections.abc import Callable, Coroutine
 from functools import wraps
 from sys import stderr
 from typing import Any, ParamSpec, TypeVar
+import base64
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -343,3 +345,31 @@ def singleton(cls):
 def check_env_variables(keys: list[str], any_or_all=all) -> bool:
 	"""Check if all required environment variables are set"""
 	return any_or_all(os.getenv(key, '').strip() for key in keys)
+
+
+async def save_failure_screenshot(browser_context, task_number: int) -> str | None:
+	"""
+	Take a screenshot of the current browser state and save it to a file.
+	
+	Args:
+		browser_context: The browser context to take the screenshot from
+		task_number: The task number to include in the filename
+		
+	Returns:
+		str: The path to the saved screenshot file, or None if saving failed
+	"""
+	try:
+		screenshot_b64 = await browser_context.take_screenshot(full_page=True)
+		# Create screenshots directory if it doesn't exist
+		os.makedirs('screenshots', exist_ok=True)
+		# Generate filename with timestamp and task number
+		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+		filename = f'screenshots/failure_task{task_number}_{timestamp}.png'
+		# Save the screenshot
+		with open(filename, 'wb') as f:
+			f.write(base64.b64decode(screenshot_b64))
+		logger.info(f"Saved failure screenshot to {filename}")
+		return filename
+	except Exception as e:
+		logger.error(f"Failed to save screenshot: {str(e)}")
+		return None

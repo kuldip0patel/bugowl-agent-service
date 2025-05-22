@@ -119,7 +119,7 @@ class BrowserConfig(BaseModel):
 	keep_alive: bool = Field(default=False, alias='_force_keep_browser_alive')  # used to be called _force_keep_browser_alive
 
 	proxy: ProxySettings | None = None
-	new_context_config: BrowserContextConfig = Field(default_factory=BrowserContextConfig)
+	new_context_config: BrowserContextConfig = Field(default_factory=lambda: BrowserContextConfig(viewport_expansion=-1))
 
 
 # @singleton: TODO - think about id singleton makes sense here

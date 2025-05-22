@@ -121,6 +121,7 @@ class Controller(Generic[Context]):
 			# if attempt_count > 2:
 			# 	return last_result
 			
+			logger.info(f"click_element_by_index")
 			session = await browser.get_session()
 
 			if params.index not in await browser.get_selector_map():
@@ -129,6 +130,7 @@ class Controller(Generic[Context]):
 			element_node = await browser.get_dom_element_by_index(params.index)
 			initial_pages = len(session.context.pages)
 
+			logger.info(f"click_element_by_index: initial_pages: {initial_pages}")
 			# if element has file uploader then dont click
 			if await browser.is_file_uploader(element_node):
 				msg = f'Index {params.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files '

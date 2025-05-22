@@ -7,6 +7,10 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .ipynb_checkpoints
+screenshots/
+videos/
+log/
+logs/
 
 # Virtual Environments
 .venv
@@ -21,7 +25,7 @@ dist/
 
 # Data files
 *.gif
-*.txt
+#*.txt
 *.pdf
 *.csv
 *.json

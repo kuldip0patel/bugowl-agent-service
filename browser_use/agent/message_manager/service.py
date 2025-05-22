@@ -56,7 +56,8 @@ class MessageManager:
 			self._add_message_with_tokens(context_message, message_type='init')
 
 		task_message = HumanMessage(
-			content=f'Your ultimate task is: """{self.task}""". If you achieved your ultimate task, stop everything and use the done action in the next step to complete the task. If not, continue as usual.'
+			# content=f'You have to complete the following tasks: """{self.task}""".'
+			content=f'"""{self.task}"""'
 		)
 		self._add_message_with_tokens(task_message, message_type='init')
 
@@ -96,6 +97,7 @@ class MessageManager:
 						""".strip(),
 						},
 						'action': [{'click_element_by_index': {'index': 127}}],
+						"last_completed_task_number": 0,
 					},
 					'id': str(self.state.tool_id),
 					'type': 'tool_call',

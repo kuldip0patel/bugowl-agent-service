@@ -24,6 +24,7 @@ class SystemPrompt:
 			prompt = override_system_message
 		else:
 			self._load_prompt_template()
+			#print(self.prompt_template)
 			prompt = self.prompt_template.format(max_actions=self.max_actions_per_step)
 
 		if extend_system_message:
@@ -75,22 +76,8 @@ class AgentMessagePrompt:
 	def get_user_message(self, use_vision: bool = True) -> HumanMessage:
 		elements_text = self.state.element_tree.clickable_elements_to_string(include_attributes=self.include_attributes)
 
-		has_content_above = (self.state.pixels_above or 0) > 0
-		has_content_below = (self.state.pixels_below or 0) > 0
-
 		if elements_text != '':
-			if has_content_above:
-				elements_text = (
-					f'... {self.state.pixels_above} pixels above - scroll or extract content to see more ...\n{elements_text}'
-				)
-			else:
-				elements_text = f'[Start of page]\n{elements_text}'
-			if has_content_below:
-				elements_text = (
-					f'{elements_text}\n... {self.state.pixels_below} pixels below - scroll or extract content to see more ...'
-				)
-			else:
-				elements_text = f'{elements_text}\n[End of page]'
+			elements_text = f'[Start of page]\n{elements_text}\n[End of page]'
 		else:
 			elements_text = 'empty page'
 
@@ -108,7 +95,7 @@ The following is one-time information - if you need to remember it write it to m
 Current url: {self.state.url}
 Available tabs:
 {self.state.tabs}
-Interactive elements from top layer of the current page inside the viewport:
+Interactive elements from the entire page:
 {elements_text}
 {step_info_description}
 """

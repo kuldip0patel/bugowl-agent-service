@@ -109,8 +109,8 @@ class AgentStepInfo:
 class ActionResult(BaseModel):
 	"""Result of executing an action"""
 
-	is_done: bool | None = False
-	success: bool | None = None
+	is_done: bool = False
+	success: bool = False
 	extracted_content: str | None = None
 	error: str | None = None
 	include_in_memory: bool = False  # whether to include in past messages as context or not
@@ -152,6 +152,7 @@ class AgentOutput(BaseModel):
 		description='List of actions to execute',
 		json_schema_extra={'min_items': 1},  # Ensure at least one action is provided
 	)
+	last_completed_task_number:int = 0 #default zero
 
 	@staticmethod
 	def type_with_custom_actions(custom_actions: type[ActionModel]) -> type[AgentOutput]:
