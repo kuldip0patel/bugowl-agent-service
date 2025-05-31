@@ -8,7 +8,7 @@ import argparse
 load_dotenv()
 from browser_use import BrowserConfig, Browser, BrowserContextConfig
 from browser_use.browser.context import BrowserContext
-import json
+from datetime import datetime
 
 def parse_args():
     parser = argparse.ArgumentParser(description='UI Automation Agent')
@@ -65,7 +65,9 @@ async def run_tasks(tasks: list[str]):
         save_recording_path="videos/",
         window_width=1920,
         window_height=1080,
-        # record_video_format="mp4"  # or "mov" # default=webm is the most compressed and optimised for web recordings.
+        viewport_expansion=-1,
+        record_video_format="webm",  # Using webm as it's the most compressed and optimized format
+        record_video_name="video_{timestamp}_{guid}.webm"  # Custom naming format with timestamp and GUID
     )
 
     config = BrowserConfig(
@@ -87,7 +89,7 @@ async def run_tasks(tasks: list[str]):
     """)
     
     print("BROWSER OPENED ALREADY?")
-    sensitive_data = {"baya_password": "Baya@1234"}
+    sensitive_data = {"baya_password": "Baya@1234", "peerlist_email": "kul.iitk@gmail.com", "peerlist_password": "Vijapur@1102"}
     if run_together:
         agent = Agent(
             tasks=tasks,
@@ -120,7 +122,7 @@ async def run_tasks(tasks: list[str]):
                     enable_memory=True,
                     use_vision=True,
                     save_conversation_path="logs/conversation",  # Save chat logs
-                    generate_gif=True
+                    generate_gif=f"{datetime.now().timestamp}.gif"
                 )
             else:
                 is_final_task = True if count == len(task) else False

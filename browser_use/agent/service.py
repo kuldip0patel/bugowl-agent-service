@@ -1131,13 +1131,17 @@ class Agent(Generic[Context]):
 					if(current_completed_task_number > last_completed_task_number):
 						logger.info(f"TASK {current_completed_task_number} is COMPLETE #########")
 						last_completed_task_number = current_completed_task_number
-					if model_output[-1].current_state.evaluation_previous_goal.startswith('Failed'):
+					print(model_output[-1])
+					eval_previous_goal = model_output[-1].current_state.evaluation_previous_goal
+					if eval_previous_goal.lower().startswith('failed'):
 						logger.error(f"STEP failed: {step_info}. with evaluation_previous_goal: {model_output[-1].current_state.evaluation_previous_goal} FAILED TASK NUMBER :{current_completed_task_number+1} ")
 						
 						# Take a screenshot of the failed state
-						await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)						
-						
-						break
+						await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)
+						if "index change" in eval_previous_goal:
+							logger.info("Index changed, so sending it to LLM and continuing")
+						else:
+							break
 
 					
 				if self.state.last_result[-1].error:

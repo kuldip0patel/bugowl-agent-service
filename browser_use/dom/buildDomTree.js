@@ -1157,18 +1157,12 @@
    */
   function buildDomTree(node, parentIframe = null, isParentHighlighted = false) {
     // Fast rejection checks first
-    if (!node || node.id === HIGHLIGHT_CONTAINER_ID || 
-        (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.TEXT_NODE)) {
+    if (!node || node.id === HIGHLIGHT_CONTAINER_ID) {
       if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
       return null;
     }
 
     if (debugMode) PERF_METRICS.nodeMetrics.totalNodes++;
-
-    if (!node || node.id === HIGHLIGHT_CONTAINER_ID) {
-      if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
-      return null;
-    }
 
     // Special handling for root node (body)
     if (node === document.body) {
@@ -1181,7 +1175,7 @@
 
       // Process children of body
       for (const child of node.childNodes) {
-        const domElement = buildDomTree(child, parentIframe, false); // Body's children have no highlighted parent initially
+        const domElement = buildDomTree(child, parentIframe, false);
         if (domElement) nodeData.children.push(domElement);
       }
 
@@ -1192,7 +1186,7 @@
     }
 
     // Early bailout for non-element nodes except text
-    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.TEXT_NODE) {
+    if (!fullTree && node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.TEXT_NODE) {
       if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
       return null;
     }
@@ -1200,14 +1194,14 @@
     // Process text nodes
     if (node.nodeType === Node.TEXT_NODE) {
       const textContent = node.textContent ? node.textContent.trim() : '';
-      if (!textContent) {
+      if (!fullTree && !textContent) {
         if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
         return null;
       }
 
       // Only check visibility for text nodes that might be visible
       const parentElement = node.parentElement;
-      if (!parentElement || parentElement.tagName.toLowerCase() === 'script') {
+      if (!fullTree && (!parentElement || parentElement.tagName.toLowerCase() === 'script')) {
         if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
         return null;
       }
@@ -1215,22 +1209,22 @@
       const id = `${ID.current++}`;
       DOM_HASH_MAP[id] = {
         type: "TEXT_NODE",
-        text: textContent,
-        isVisible: isTextNodeVisible(node),
+        text: textContent || '',  // Include empty text nodes when fullTree is true
+        isVisible: fullTree ? true : isTextNodeVisible(node),
       };
       if (debugMode) PERF_METRICS.nodeMetrics.processedNodes++;
       return id;
     }
 
     // Quick checks for element nodes
-    if (node.nodeType === Node.ELEMENT_NODE && !isElementAccepted(node)) {
+    if (!fullTree && node.nodeType === Node.ELEMENT_NODE && !isElementAccepted(node)) {
       if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
       return null;
     }
 
-    // Early viewport check - only filter out elements clearly outside viewport
-    if (viewportExpansion !== -1) {
-      const rect = getCachedBoundingRect(node); // Keep for initial quick check
+    // Skip viewport check when fullTree is true
+    if (!fullTree && viewportExpansion !== -1) {
+      const rect = getCachedBoundingRect(node);
       const style = getCachedComputedStyle(node);
 
       // Skip viewport check for fixed/sticky elements as they may appear anywhere
@@ -1239,15 +1233,12 @@
       // Check if element has actual dimensions using offsetWidth/Height (quick check)
       const hasSize = node.offsetWidth > 0 || node.offsetHeight > 0;
 
-      // Use getBoundingClientRect for the quick OUTSIDE check.
-      // isInExpandedViewport will do the more accurate check later if needed.
       if (!rect || (!isFixedOrSticky && !hasSize && (
         rect.bottom < -viewportExpansion ||
         rect.top > window.innerHeight + viewportExpansion ||
         rect.right < -viewportExpansion ||
         rect.left > window.innerWidth + viewportExpansion
       ))) {
-        // console.log("Skipping node outside viewport (quick check):", node.tagName, rect);
         if (debugMode) PERF_METRICS.nodeMetrics.skippedNodes++;
         return null;
       }
@@ -1262,7 +1253,7 @@
     };
 
     // Get attributes for interactive elements or potential text containers
-    if (isInteractiveCandidate(node) || node.tagName.toLowerCase() === 'iframe' || node.tagName.toLowerCase() === 'body') {
+    if (fullTree || isInteractiveCandidate(node) || node.tagName.toLowerCase() === 'iframe' || node.tagName.toLowerCase() === 'body') {
       const attributeNames = node.getAttributeNames?.() || [];
       for (const name of attributeNames) {
         nodeData.attributes[name] = node.getAttribute(name);
@@ -1272,11 +1263,11 @@
     let nodeWasHighlighted = false;
     // Perform visibility, interactivity, and highlighting checks
     if (node.nodeType === Node.ELEMENT_NODE) {
-      nodeData.isVisible = isElementVisible(node); // isElementVisible uses offsetWidth/Height, which is fine
-      if (nodeData.isVisible) {
-        nodeData.isTopElement = isTopElement(node);
-        if (nodeData.isTopElement) {
-          nodeData.isInteractive = isInteractiveElement(node);
+      nodeData.isVisible = fullTree ? true : isElementVisible(node);
+      if (fullTree || nodeData.isVisible) {
+        nodeData.isTopElement = fullTree ? true : isTopElement(node);
+        if (fullTree || nodeData.isTopElement) {
+          nodeData.isInteractive = fullTree ? false : isInteractiveElement(node);
           // Call the dedicated highlighting function
           nodeWasHighlighted = handleHighlighting(nodeData, node, parentIframe, isParentHighlighted);
         }

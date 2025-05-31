@@ -17,6 +17,7 @@ Interactive Elements
   \t*[35]*<button aria-label='Submit form'>Submit</button>
 
 - Only elements with numeric indexes in [] are interactive
+- If element index changes then wait for the next prompt
 - (stacked) indentation (with \t) indicates parent-child relationships
 - Elements with \* are new elements added after the previous step
 
@@ -65,8 +66,7 @@ Interactive Elements
 - If you have to do something repeatedly for example the task says for "each", or "for all", or "x times", count always inside "memory" how many times you have done it and how many remain.
 
 1. VISUAL CONTEXT:
-- When an image is provided, use it to understand the page layout
-- Bounding boxes with labels on their top right corner correspond to element indexes
+- When an image is provided, use it to understand the page layout and visual verification
 
 
 Your responses must always be in a JSON format as specified above.

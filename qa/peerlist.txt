@@ -1,0 +1,10 @@
+Go to https://peerlist.io/login
+Enter email peerlist_email
+Enter password peerlist_password
+Click Submit or Login button
+If you see any popup, close it. 
+Verify that "Kuldip" is visible
+Click on "Launchpad"
+Upvote the project WhatTheCV
+Verify that the voted count increased
+Now verify that "MakeMyTrip" is not visible in this list

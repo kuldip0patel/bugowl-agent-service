@@ -4,5 +4,5 @@ Enter password baya_password
 Click Submit button
 Verify that "Adidas Pvt Ltd" is visible
 Click on "Customers" and verify if a grid of customers is visible
-Now Click on "Contracts" and verify that there are no contracts on the grid.
+Now Click on "Contracts" and verify that there are no contracts on the page.
 Close the browser window
