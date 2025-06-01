@@ -449,7 +449,8 @@ class Agent(Generic[Context]):
 			)
 			if sys.stdin.isatty():
 				try:
-					time.sleep(10)
+					#time.sleep(10)
+					logger.info("This test has a sensitive data")
 				except KeyboardInterrupt:
 					print(
 						'\n\n 🛑 Exiting now... set BrowserContextConfig(allowed_domains=["example.com", "example.org"]) to only domains you trust to see your sensitive_data.'
