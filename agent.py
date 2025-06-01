@@ -223,7 +223,7 @@ async def run_tasks(tasks: list[str]):
     """)
     
     print("BROWSER OPENED ALREADY!")
-    sensitive_data = {"baya_password": "Baya@1234", "peerlist_email": "kul.iitk@gmail.com", "peerlist_password": "Vijapur@1102", "hubspot_email": "kuldip@baya.biz", "hubspot_password": "Vijapur@1102"}
+    sensitive_data = {"baya_password": "Baya@1234", "peerlist_email": "kul.iitk@gmail.com"}
     if run_together:
         agent = Agent(
             tasks=tasks,
