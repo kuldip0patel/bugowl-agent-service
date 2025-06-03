@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 from browser_use import Agent
 from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.browser.context import BrowserContextConfig
-from browser_use.utils.video_recorder import VideoRecorder, LiveStreamer, capture_screen
+from browser_use.browser.utils.video_recorder import VideoRecorder, LiveStreamer, capture_screen
 
 load_dotenv()
 

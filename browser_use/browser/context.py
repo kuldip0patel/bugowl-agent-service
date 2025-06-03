@@ -1703,7 +1703,7 @@ class BrowserContext:
 		"""
 		Optimized method to click an element using xpath.
 		"""
-		logger.info(f"_click_element_node?: {element_node}")
+		logger.debug(f"_click_element_node?: {element_node}")
 		page = await self.get_agent_current_page()
 
 		try:
@@ -1712,7 +1712,7 @@ class BrowserContext:
 			# 	await self._update_state(focus_element=element_node.highlight_index)
 
 			element_handle = await self.get_locate_element(element_node)
-			#logger.info(f"_click_element_node? {element_handle}")
+			#logger.debug(f"_click_element_handle? {element_handle}")
 			
 			if element_handle is None:
 				raise Exception(f'Element: {repr(element_node)} not found')

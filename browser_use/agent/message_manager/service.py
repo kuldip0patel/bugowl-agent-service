@@ -77,8 +77,9 @@ class MessageManager:
 					'name': 'AgentOutput',
 					'args': {
 						'current_state': {
-							'evaluation_previous_goal': """
-							Success - I successfully clicked on the 'Apple' link from the Google Search results page, 
+							'evaluation_previous_goal': """Success""".strip(),
+							'details_previous_goal': """
+							I successfully clicked on the 'Apple' link from the Google Search results page, 
 							which directed me to the 'Apple' company homepage. This is a good start toward finding 
 							the best place to buy a new iPhone as the Apple website often list iPhones for sale.
 						""".strip(),

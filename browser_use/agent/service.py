@@ -216,7 +216,7 @@ def log_response(response: AgentOutput) -> None:
 	else:
 		emoji = '🤷'
 
-	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
+	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}, Details {response.current_state.details_previous_goal}')
 	logger.info(f'🧠 Memory: {response.current_state.memory}')
 	logger.info(f'🎯 Next goal: {response.current_state.next_goal}')
 	for i, action in enumerate(response.action):
@@ -452,7 +452,7 @@ class Agent(Generic[Context]):
 					#time.sleep(10)
 					logger.info("This test has a sensitive data")
 				except KeyboardInterrupt:
-					print(
+					logger.info(
 						'\n\n 🛑 Exiting now... set BrowserContextConfig(allowed_domains=["example.com", "example.org"]) to only domains you trust to see your sensitive_data.'
 					)
 					sys.exit(0)
@@ -857,7 +857,7 @@ class Agent(Generic[Context]):
 			logger.debug(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			try:
 				output = self.llm.invoke(input_messages)
-				print(f"response for {self.tool_calling_method} : {output}")
+				logger.debug(f"response for {self.tool_calling_method} : {output}")
 				response = {'raw': output, 'parsed': None}
 			except Exception as e:
 				logger.error(f'Failed to invoke model: {str(e)}')
@@ -876,7 +876,7 @@ class Agent(Generic[Context]):
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True)
 			try:
 				response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
-				print(f"response for {self.tool_calling_method} : {response} ")
+				logger.debug(f"response for {self.tool_calling_method} : {response} ")
 				parsed: AgentOutput | None = response['parsed']
 
 			except Exception as e:
@@ -1019,7 +1019,7 @@ class Agent(Generic[Context]):
 		"""
 		await self.step()
 
-		#print(f"HISTORY: {self.state.history}")
+		#logger.debug(f"HISTORY: {self.state.history}")
 		if not self.state.history.is_successful:
 			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
 			return True, False
@@ -1121,7 +1121,7 @@ class Agent(Generic[Context]):
 					break
 					
 				if on_step_start is not None:
-					print(on_step_start)
+					logger.debug(on_step_start)
 					await on_step_start(self)
 					
 				step_info = AgentStepInfo(step_number=step, max_steps=max_steps)
@@ -1132,10 +1132,10 @@ class Agent(Generic[Context]):
 					if(current_completed_task_number > last_completed_task_number):
 						logger.info(f"TASK {current_completed_task_number} is COMPLETE #########")
 						last_completed_task_number = current_completed_task_number
-					print(model_output[-1])
+					logger.debug(model_output[-1])
 					eval_previous_goal = model_output[-1].current_state.evaluation_previous_goal
 					if eval_previous_goal.lower().startswith('failed'):
-						logger.error(f"STEP failed: {step_info}. with evaluation_previous_goal: {model_output[-1].current_state.evaluation_previous_goal} FAILED TASK NUMBER :{current_completed_task_number+1} ")
+						logger.error(f"STEP failed: {step_info}. with evaluation_previous_goal: {model_output[-1].current_state.evaluation_previous_goal} : {model_output[-1].current_state.details_previous_goal}  FAILED TASK NUMBER :{current_completed_task_number+1} ")
 						
 						# Take a screenshot of the failed state
 						await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)
@@ -1439,7 +1439,7 @@ class Agent(Generic[Context]):
 
 	def pause(self) -> None:
 		"""Pause the agent before the next step"""
-		print('\n\n⏸️  Got Ctrl+C, paused the agent and left the browser open.')
+		logger.info('\n\n⏸️  Got Ctrl+C, paused the agent and left the browser open.')
 		self.state.paused = True
 
 		# The signal handler will handle the asyncio pause logic for us
@@ -1447,8 +1447,8 @@ class Agent(Generic[Context]):
 
 	def resume(self) -> None:
 		"""Resume the agent"""
-		print('----------------------------------------------------------------------')
-		print('▶️  Got Enter, resuming agent execution where it left off...\n')
+		logger.info('----------------------------------------------------------------------')
+		logger.info('▶️  Got Enter, resuming agent execution where it left off...\n')
 		self.state.paused = False
 
 		# The signal handler should have already reset the flags
@@ -1551,9 +1551,9 @@ class Agent(Generic[Context]):
 
 		# Get all standard actions (no filter) and page-specific actions
 		standard_actions = self.controller.registry.get_prompt_description()  # No page = system prompt actions
-		print(f"standard_actions : {standard_actions}")
+		logger.info(f"standard_actions : {standard_actions}")
 		page_actions = self.controller.registry.get_prompt_description(page)  # Page-specific actions
-		print(f"page_actions : {page_actions}")
+		logger.info(f"page_actions : {page_actions}")
 
 		# Combine both for the planner
 		all_actions = standard_actions
@@ -1568,7 +1568,7 @@ class Agent(Generic[Context]):
 			),
 			*self._message_manager.get_messages()[1:],  # Use full message history except the first
 		]
-		print(f"planner_messages: {planner_messages}")
+		logger.info(f"planner_messages: {planner_messages}")
 
 		if not self.settings.use_vision_for_planner and self.settings.use_vision:
 			last_state_message: HumanMessage = planner_messages[-1]

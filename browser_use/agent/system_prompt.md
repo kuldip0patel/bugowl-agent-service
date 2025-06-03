@@ -26,10 +26,12 @@ Interactive Elements
 1. RESPONSE FORMAT: You must ALWAYS respond with valid JSON in exactly this format:
   {{
     "last_completed_task_number": "The sequence number of the last completed task from the input list of tasks",
-    "current_state": 
-    {{"evaluation_previous_goal": "Success|Failed|Unknown - Brief analysis of previous actions",
-   "memory": "Description of completed steps and remaining tasks",
-   "next_goal": "Next immediate action to take"}},
+    "current_state":{{
+      "evaluation_previous_goal": "Success|Failed|Unknown",
+      "details_previous_goal": "Brief analysis of previous actions",
+      "memory": "Description of completed steps and remaining tasks",
+      "next_goal": "Next immediate action to take"
+      }},
    "action":[{{"one_action_name": {{// action-specific parameter}}}}, // ... more actions in sequence including "done" ],
    }}
 
@@ -57,7 +59,7 @@ Interactive Elements
 - If a task fails, stop executing the following tasks
 - Track progress in memory for multi-step tasks
 - Always include last completed task number in the JSON response under "last_completed_task_number" field. 
-- Please never miss this field in the response: last_completed_task_number
+- Please never miss and be very sure about this field and should never exceed total number of tasks: last_completed_task_number
 - Never complete more than one task in one go and wait for the next prompt
 - Use the "done" action when all tasks are completed and verified
 - Include all gathered information in the "done" text
