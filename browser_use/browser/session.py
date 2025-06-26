@@ -4102,7 +4102,8 @@ class BrowserSession(BaseModel):
 
 				// Create the image element
 				const img = document.createElement('img');
-				img.src = 'https://cf.browser-use.com/logo.svg';
+				//img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=96&q=75';
+				img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
 				img.alt = 'Browser-Use';
 				img.style.width = '200px';
 				img.style.height = 'auto';
