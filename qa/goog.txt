@@ -1,0 +1,5 @@
+go to google
+search "narsinh"
+go to images tab
+verify that an image with man-lion face appears in the results
+verify that an image of a saint is present.

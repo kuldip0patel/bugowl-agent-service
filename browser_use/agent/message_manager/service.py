@@ -133,11 +133,11 @@ class MessageManager:
 		"""Initialize the message history with system message, context, task, and other initial messages"""
 		self._add_message_with_type(self.system_prompt, message_type='init')
 
-		placeholder_message = UserMessage(
-			content='<example_1>\nHere is an example output of thinking and tool call. You can use it as a reference but do not copy it exactly.'
-		)
+		# placeholder_message = UserMessage(
+		# 	content='<example_1>\nHere is an example output of thinking and tool call. You can use it as a reference but do not copy it exactly.'
+		# )
 		# placeholder_message = HumanMessage(content='Example output:')
-		self._add_message_with_type(placeholder_message, message_type='init')
+		#self._add_message_with_type(placeholder_message, message_type='init')
 
 		# Create base example content
 		example_content = {
@@ -177,15 +177,15 @@ After writing todo.md, I can also initialize a github.md file to accumulate the 
 The file system actions do not change the browser state, so I can also click on the bytedance/UI-TARS-desktop (index [4]) to start collecting information."""
 
 		example_tool_call_1 = AssistantMessage(content=json.dumps(example_content))
-		self._add_message_with_type(example_tool_call_1, message_type='init')
-		self._add_message_with_type(
-			UserMessage(
-				content='Data written to todo.md.\nData written to github.md.\nClicked element with index 4.\n</example_1>',
-			),
-			message_type='init',
-		)
+		#self._add_message_with_type(example_tool_call_1, message_type='init')
+		# self._add_message_with_type(
+		# 	UserMessage(
+		# 		content='Data written to todo.md.\nData written to github.md.\nClicked element with index 4.\n</example_1>',
+		# 	),
+		# 	message_type='init',
+		# )
 
-		placeholder_message = UserMessage(content='<example_2>Example thinking and tool call 2:')
+		# placeholder_message = UserMessage(content='<example_2>Example thinking and tool call 2:')
 		# self._add_message_with_tokens(placeholder_message, message_type='init')
 
 		# TODO: add this back
@@ -441,7 +441,7 @@ Next Goal: {model_output.current_state.next_goal}
 
 			# Replace all valid sensitive data values with their placeholder tags
 			for key, val in sensitive_values.items():
-				value = value.replace(val, f'<secret>{key}</secret>')
+				value = value.replace(f'<secret>{key}</secret>', val)
 
 			return value
 

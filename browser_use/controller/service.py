@@ -337,15 +337,15 @@ class Controller(Generic[Context]):
 				extracted_content=msg, include_in_memory=True, long_term_memory=f'Switched to tab {params.page_id}'
 			)
 
-		@self.registry.action('Open a specific url in new tab', param_model=OpenTabAction)
-		async def open_tab(params: OpenTabAction, browser_session: BrowserSession):
-			page = await browser_session.create_new_tab(params.url)
-			tab_idx = browser_session.tabs.index(page)
-			msg = f'🔗  Opened new tab #{tab_idx} with url {params.url}'
-			logger.info(msg)
-			return ActionResult(
-				extracted_content=msg, include_in_memory=True, long_term_memory=f'Opened new tab with URL {params.url}'
-			)
+		# @self.registry.action('Open a specific url in new tab', param_model=OpenTabAction)
+		# async def open_tab(params: OpenTabAction, browser_session: BrowserSession):
+		# 	page = await browser_session.create_new_tab(params.url)
+		# 	tab_idx = browser_session.tabs.index(page)
+		# 	msg = f'🔗  Opened new tab #{tab_idx} with url {params.url}'
+		# 	logger.info(msg)
+		# 	return ActionResult(
+		# 		extracted_content=msg, include_in_memory=True, long_term_memory=f'Opened new tab with URL {params.url}'
+		# 	)
 
 		@self.registry.action('Close an existing tab', param_model=CloseTabAction)
 		async def close_tab(params: CloseTabAction, browser_session: BrowserSession):
@@ -362,7 +362,16 @@ class Controller(Generic[Context]):
 				include_in_memory=True,
 				long_term_memory=f'Closed tab {params.page_id} with url {url}, now focused on tab {new_page_idx} with url {new_page.url}.',
 			)
-
+		
+		@self.registry.action('Navigate to a specific url in the current tab', param_model=OpenTabAction)
+		async def navigate_in_current_tab(params: OpenTabAction, browser_session: BrowserSession):
+			page = await browser_session.get_current_page()
+			await page.goto(params.url)
+			msg = f'🔗  Navigated current tab to {params.url}'
+			logger.info(msg)
+			return ActionResult(
+				extracted_content=msg, include_in_memory=True, long_term_memory=f'Navigated to URL {params.url}'
+			)
 		# Content Actions
 		@self.registry.action(
 			"""Extract structured, semantic data (e.g. product description, price, all information about XYZ) from the current webpage based on a textual query.
@@ -809,7 +818,8 @@ Explain the content of the page and that the requested information is not availa
 										tagName: select.tagName,
 										optionCount: select.options.length,
 										currentValue: select.value,
-										availableOptions: Array.from(select.options).map(o => o.text.trim())
+										availableOptions: Array.from(select.options).map(o => o.text ? o.text.trim() : '')
+
 									};
 								} catch (e) {
 									return {error: e.toString(), found: false};

@@ -1237,8 +1237,8 @@ class BrowserSession(BaseModel):
 				await page.set_viewport_size(viewport)
 
 			# show browser-use dvd screensaver-style bouncing loading animation on any about:blank pages
-			if page.url == 'about:blank':
-				await self._show_dvd_screensaver_loading_animation(page)
+			# if page.url == 'about:blank':
+			# 	await self._show_dvd_screensaver_loading_animation(page)
 
 		page = page or (await self.browser_context.new_page())
 
@@ -1255,7 +1255,7 @@ class BrowserSession(BaseModel):
 						'windowId': window_id_result['windowId'],
 						'bounds': {
 							**self.browser_profile.window_size,
-							'windowState': 'normal',  # Ensure window is not minimized/maximized
+							'windowState': 'maximized',  # Ensure window is not minimized/maximized
 						},
 					},
 				)

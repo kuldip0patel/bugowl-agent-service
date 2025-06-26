@@ -1,0 +1,11 @@
+Visit https://dashboard-stg.baya.biz/login
+Enter email kuldip+adidas@baya.biz
+Enter password baya_password
+Click Submit button
+Click on "Single Payment Request"
+Please choose any Customer from the dropdown
+Enter a random invoice number of length 10
+Fill up all of the fields with some values, do not leave anything blank, scroll down if required to fill them all but do not stop. For date fields always select future dates.
+Then click on "Generate Payment Request" or similar button and make sure there are no errors.
+Verify that the payment request we created with the invoice number, the same invoice number is visible in the payment requests grid
+Click on "Contracts" on the left panel

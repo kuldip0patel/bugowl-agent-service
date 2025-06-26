@@ -72,7 +72,7 @@ eval = [
     "psutil>=7.0.0",
 ]
 all = [
-    "browser-use[memory,cli,examples]",
+    # "browser-use[memory,cli,examples]",  # Removed self-dependency
 ]
 
 # will prefer to use local source code checked out in ../../browser-use (if present) instead of pypi browser-use package
@@ -126,6 +126,7 @@ include = [
     "browser_use/agent/system_prompt.md",
     "browser_use/dom/buildDomTree.js",
     "!tests/**/*.py",
+    "browser_use/agent/system_prompt_bugowl.md",
 ]
 
 [tool.pytest.ini_options]

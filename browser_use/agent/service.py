@@ -100,6 +100,7 @@ def log_response(response: AgentOutput, registry=None, logger=None) -> None:
 	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
 	logger.info(f'🧠 Memory: {response.current_state.memory}')
 	logger.info(f'🎯 Next goal: {response.current_state.next_goal}\n')
+	logger.info(f'📝 LLM Output: {response}')
 
 
 Context = TypeVar('Context')
@@ -114,6 +115,7 @@ class Agent(Generic[Context]):
 	@time_execution_sync('--init')
 	def __init__(
 		self,
+		# tasks: list[str],
 		task: str,
 		llm: BaseChatModel,
 		# Optional parameters
@@ -199,6 +201,7 @@ class Agent(Generic[Context]):
 		self.llm = llm
 		self.controller = controller
 		self.sensitive_data = sensitive_data
+		self.tasks_result = []
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -222,7 +225,6 @@ class Agent(Generic[Context]):
 			extend_planner_system_message=extend_planner_system_message,
 			use_thinking=use_thinking,
 		)
-
 		# Token cost service
 		self.token_cost_service = TokenCost()
 		self.token_cost_service.register_llm(llm)
@@ -285,6 +287,8 @@ class Agent(Generic[Context]):
 
 		# Initialize message manager with state
 		# Initial system prompt with all actions - will be updated during each step
+		
+		# task_str = json.dumps({'tasks': tasks})
 		self._message_manager = MessageManager(
 			task=task,
 			system_message=SystemPrompt(
@@ -367,7 +371,7 @@ class Agent(Generic[Context]):
 				id=uuid7str()[:-4] + self.id[-4:],  # re-use the same 4-char suffix so they show up together in logs
 			)
 
-		if self.sensitive_data:
+		if self.sensitive_data and False: #No need to run this section
 			# Check if sensitive_data has domain-specific credentials
 			has_domain_specific_credentials = any(isinstance(v, dict) for v in self.sensitive_data.values())
 
@@ -465,6 +469,9 @@ class Agent(Generic[Context]):
 
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
+		self._is_initialized = False
+		self._signal_handler = None
+		# self._is_final_task = False
 
 	@property
 	def logger(self) -> logging.Logger:
@@ -529,42 +536,42 @@ class Agent(Generic[Context]):
 		# TODO: move this logic to special registries -> we have methods to combine controllers
 
 		# if file system is set, add actions to the controller
-		@self.controller.registry.action('Write content to file_name in file system, use only .md or .txt extensions.')
-		async def write_file(file_name: str, content: str):
-			result = await self.file_system.write_file(file_name, content)
-			logger.info(f'💾 {result}')
-			return ActionResult(
-				extracted_content=result,
-				include_in_memory=True,
-				long_term_memory=result,
-			)
+		# @self.controller.registry.action('Write content to file_name in file system, use only .md or .txt extensions.')
+		# async def write_file(file_name: str, content: str):
+		# 	result = await self.file_system.write_file(file_name, content)
+		# 	logger.info(f'💾 {result}')
+		# 	return ActionResult(
+		# 		extracted_content=result,
+		# 		include_in_memory=True,
+		# 		long_term_memory=result,
+		# 	)
 
-		@self.controller.registry.action('Append content to file_name in file system')
-		async def append_file(file_name: str, content: str):
-			result = await self.file_system.append_file(file_name, content)
-			logger.info(f'💾 {result}')
-			return ActionResult(
-				extracted_content=result,
-				include_in_memory=True,
-				long_term_memory=result,
-			)
+		# @self.controller.registry.action('Append content to file_name in file system')
+		# async def append_file(file_name: str, content: str):
+		# 	result = await self.file_system.append_file(file_name, content)
+		# 	logger.info(f'💾 {result}')
+		# 	return ActionResult(
+		# 		extracted_content=result,
+		# 		include_in_memory=True,
+		# 		long_term_memory=result,
+		# 	)
 
-		@self.controller.registry.action('Read file_name from file system')
-		async def read_file(file_name: str):
-			result = await self.file_system.read_file(file_name)
-			max_len = 50
-			if len(result) > max_len:
-				display_result = result[:max_len] + '\n...'
-			else:
-				display_result = result
-			logger.info(f'💾 {display_result}')
-			memory = result.split('\n')[-1]
-			return ActionResult(
-				extracted_content=result,
-				include_in_memory=True,
-				long_term_memory=memory,
-				include_extracted_content_only_once=True,
-			)
+		# @self.controller.registry.action('Read file_name from file system')
+		# async def read_file(file_name: str):
+		# 	result = await self.file_system.read_file(file_name)
+		# 	max_len = 50
+		# 	if len(result) > max_len:
+		# 		display_result = result[:max_len] + '\n...'
+		# 	else:
+		# 		display_result = result
+		# 	logger.info(f'💾 {display_result}')
+		# 	memory = result.split('\n')[-1]
+		# 	return ActionResult(
+		# 		extracted_content=result,
+		# 		include_in_memory=True,
+		# 		long_term_memory=memory,
+		# 		include_extracted_content_only_once=True,
+		# 	)
 
 	def _set_message_context(self) -> str | None:
 		return self.settings.message_context
@@ -629,6 +636,7 @@ class Agent(Generic[Context]):
 		# The task continues with new instructions, it doesn't end and start a new one
 		self.task = new_task
 		self._message_manager.add_new_task(new_task)
+		# self._is_final_task = is_final_task
 
 	async def _raise_if_stopped_or_paused(self) -> None:
 		"""Utility function that raises an InterruptedError if the agent is stopped or paused."""
@@ -703,7 +711,11 @@ class Agent(Generic[Context]):
 			input_messages = self._message_manager.get_messages()
 
 			try:
+				self.logger.info(f'\n\n--------------------------------------\n🧠 Invoking LLM: {self.llm.provider} / {self.llm.model}\n--------------------------------------')
+				start_time = time.time()
 				model_output = await self.get_next_action(input_messages)
+				elapsed = time.time() - start_time
+				self.logger.info(f'⏱️ LLM call took {elapsed:.2f} seconds')
 				if (
 					not model_output.action
 					or not isinstance(model_output.action, list)
@@ -1089,6 +1101,20 @@ class Agent(Generic[Context]):
 		"""
 		await self.step()
 
+		if not self.state.history.is_successful:
+			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
+			return True, False
+
+		#If error in action, then stop
+		if self.state.last_result and self.state.last_result[-1].error:
+			logger.error(f"LAST STEP ERROR: {self.state.last_result[-1].error}")
+			if "rate limit" in self.state.last_result[-1].error.lower():
+				logger.warning("Rate limit error detected, waiting and retrying...")
+				await asyncio.sleep(self.settings.retry_delay)
+				return await self.take_step()
+			else:
+				return True, False
+			
 		if self.state.history.is_done():
 			await self.log_completion()
 			if self.register_done_callback:
@@ -1109,32 +1135,31 @@ class Agent(Generic[Context]):
 		on_step_end: AgentHookFunc | None = None,
 	) -> AgentHistoryList:
 		"""Execute the task with maximum number of steps"""
+		if not self._is_initialized:
+			loop = asyncio.get_event_loop()
+			agent_run_error: str | None = None  # Initialize error tracking variable
+			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
 
-		loop = asyncio.get_event_loop()
-		agent_run_error: str | None = None  # Initialize error tracking variable
-		self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
+			# Set up the  signal handler with callbacks specific to this agent
+			from browser_use.utils import SignalHandler
 
-		# Set up the  signal handler with callbacks specific to this agent
-		from browser_use.utils import SignalHandler
+			# Define the custom exit callback function for second CTRL+C
+			def on_force_exit_log_telemetry():
+				self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
+				# NEW: Call the flush method on the telemetry instance
+				if hasattr(self, 'telemetry') and self.telemetry:
+					self.telemetry.flush()
+				self._force_exit_telemetry_logged = True  # Set the flag
 
-		# Define the custom exit callback function for second CTRL+C
-		def on_force_exit_log_telemetry():
-			self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
-			# NEW: Call the flush method on the telemetry instance
-			if hasattr(self, 'telemetry') and self.telemetry:
-				self.telemetry.flush()
-			self._force_exit_telemetry_logged = True  # Set the flag
+			signal_handler = SignalHandler(
+				loop=loop,
+				pause_callback=self.pause,
+				resume_callback=self.resume,
+				custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
+				exit_on_second_int=True,
+			)
+			signal_handler.register()
 
-		signal_handler = SignalHandler(
-			loop=loop,
-			pause_callback=self.pause,
-			resume_callback=self.resume,
-			custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
-			exit_on_second_int=True,
-		)
-		signal_handler.register()
-
-		try:
 			self._log_agent_run()
 
 			# Initialize timing for session and task
@@ -1151,7 +1176,8 @@ class Agent(Generic[Context]):
 			if self.initial_actions:
 				result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
 				self.state.last_result = result
-
+				
+		try:
 			for step in range(max_steps):
 				# Replace the polling with clean pause-wait
 				if self.state.paused:
@@ -1185,6 +1211,33 @@ class Agent(Generic[Context]):
 				if on_step_end is not None:
 					await on_step_end(self)
 
+				# model_output = self.state.history.model_outputs()
+				# if model_output:
+				# 	from browser_use.utils import save_failure_screenshot
+				# 	current_completed_task_number = model_output[-1].last_completed_task_number
+				# 	if(current_completed_task_number > last_completed_task_number):
+				# 		logger.info(f"TASK {current_completed_task_number} is COMPLETE #########")
+				# 		last_completed_task_number = current_completed_task_number
+				# 	logger.debug(model_output[-1])
+				# 	eval_previous_goal = model_output[-1].current_state.evaluation_previous_goal
+				# 	if eval_previous_goal.lower().startswith('failed'):
+				# 		logger.error(f"STEP failed: {step_info}. with evaluation_previous_goal: {model_output[-1].current_state.evaluation_previous_goal} : {model_output[-1].current_state.details_previous_goal}  FAILED TASK NUMBER :{current_completed_task_number+1} ")
+
+				# 		# Take a screenshot of the failed state
+				# 		await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)
+				# 		if "index change" in eval_previous_goal:
+				# 			logger.info("Index changed, so sending it to LLM and continuing")
+				# 		else:
+				# 			break
+
+
+				# if self.state.last_result and self.state.last_result[-1].error:
+				# 	from browser_use.utils import save_failure_screenshot
+				# 	logger.error(f"STEP failed: {step_info}. with error: {self.state.last_result[-1].error} FAILED TASK NUMBER :{current_completed_task_number+1} ")
+				# 	# Take a screenshot of the failed state
+				# 	await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)						
+				# 	#self.pause()
+				# 	break
 				if self.state.history.is_done():
 					await self.log_completion()
 
@@ -1209,7 +1262,13 @@ class Agent(Generic[Context]):
 				)
 
 				self.logger.info(f'❌ {agent_run_error}')
+			# for i in range(current_completed_task_number):
+			# 	self.tasks_result.append((self.tasks[i], True))
+			# if len(self.tasks_result) < (len(self.tasks) - 1):# Add next one as failed task, if it is not the last one
+			# 	self.tasks_result.append((self.tasks[len(self.tasks_result)], False))
 
+			total_tokens = self.token_cost_service.get_usage_summary(calculate_cost=False).total_tokens
+			logger.info(f'📝 $$$$$ Total input tokens used (approximate): {total_tokens}')
 			return self.state.history
 
 		except KeyboardInterrupt:
