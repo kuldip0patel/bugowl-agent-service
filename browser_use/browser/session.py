@@ -1237,8 +1237,8 @@ class BrowserSession(BaseModel):
 				await page.set_viewport_size(viewport)
 
 			# show browser-use dvd screensaver-style bouncing loading animation on any about:blank pages
-			# if page.url == 'about:blank':
-			# 	await self._show_dvd_screensaver_loading_animation(page)
+			if page.url == 'about:blank':
+				await self._show_dvd_screensaver_loading_animation(page)
 
 		page = page or (await self.browser_context.new_page())
 
@@ -3293,7 +3293,8 @@ class BrowserSession(BaseModel):
 
 			// Create the image element
 			const img = document.createElement('img');
-			img.src = 'https://cf.browser-use.com/logo.svg';
+			//img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=96&q=75';
+			img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
 			img.alt = 'Browser-Use';
 			img.style.width = '200px';
 			img.style.height = 'auto';
