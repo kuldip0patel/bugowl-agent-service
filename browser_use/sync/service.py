@@ -52,7 +52,7 @@ class CloudSync:
 							logger.warning('Cannot start auth - session_id not set yet')
 
 			# Send event to cloud
-			await self._send_event(event)
+			#await self._send_event(event)
 
 		except Exception as e:
 			logger.error(f'Failed to handle {event.event_type} event: {type(e).__name__}: {e}', exc_info=True)
@@ -129,7 +129,7 @@ class CloudSync:
 
 			if success:
 				# Resend any pending events
-				await self._resend_pending_events()
+				#await self._resend_pending_events()
 
 				# Update WAL events with real user_id
 				await self._update_wal_user_ids(agent_session_id)

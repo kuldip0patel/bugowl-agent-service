@@ -97,6 +97,7 @@ def log_response(response: AgentOutput, registry=None, logger=None) -> None:
 	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
 	logger.info(f'🧠 Memory: {response.current_state.memory}')
 	logger.info(f'🎯 Next goal: {response.current_state.next_goal}\n')
+	logger.info(f'📝 LLM Output: {response}')
 
 
 Context = TypeVar('Context')
@@ -112,6 +113,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	@time_execution_sync('--init')
 	def __init__(
 		self,
+		# tasks: list[str],
 		task: str,
 		llm: BaseChatModel,
 		# Optional parameters
@@ -219,6 +221,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.controller.use_structured_output_action(self.output_model_schema)
 
 		self.sensitive_data = sensitive_data
+		self.tasks_result = []
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -245,7 +248,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			calculate_cost=calculate_cost,
 			include_tool_call_examples=include_tool_call_examples,
 		)
-
 		# Token cost service
 		self.token_cost_service = TokenCost(include_cost=calculate_cost)
 		self.token_cost_service.register_llm(llm)
@@ -293,6 +295,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Initialize message manager with state
 		# Initial system prompt with all actions - will be updated during each step
+		
+		# task_str = json.dumps({'tasks': tasks})
 		self._message_manager = MessageManager(
 			task=task,
 			system_message=SystemPrompt(
@@ -347,7 +351,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				id=uuid7str()[:-4] + self.id[-4:],  # re-use the same 4-char suffix so they show up together in logs
 			)
 
-		if self.sensitive_data:
+		if self.sensitive_data and False: #No need to run this section
 			# Check if sensitive_data has domain-specific credentials
 			has_domain_specific_credentials = any(isinstance(v, dict) for v in self.sensitive_data.values())
 
@@ -446,6 +450,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		self._external_pause_event = asyncio.Event()
 		self._external_pause_event.set()
+		self._is_initialized = False
+		self._signal_handler = None
+		# self._is_final_task = False
 
 	@property
 	def logger(self) -> logging.Logger:
@@ -620,6 +627,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# The task continues with new instructions, it doesn't end and start a new one
 		self.task = new_task
 		self._message_manager.add_new_task(new_task)
+		# self._is_final_task = is_final_task
 
 	async def _raise_if_stopped_or_paused(self) -> None:
 		"""Utility function that raises an InterruptedError if the agent is stopped or paused."""
@@ -663,8 +671,16 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Phase 1: Prepare context and timing
 			browser_state_summary = await self._prepare_context(step_info)
 
+			self.logger.info(f'\n\n--------------------------------------\n🧠 Invoking LLM: {self.llm.provider} / {self.llm.model}\n--------------------------------------')
+			start_time = time.time()
+			
 			# Phase 2: Get model output and execute actions
 			await self._get_next_action(browser_state_summary)
+
+			elapsed = time.time() - start_time
+			self.logger.info(f'⏱️ LLM call took {elapsed:.2f} seconds')			
+
+			#Phase 2.5: Execute actions
 			await self._execute_actions()
 
 			# Phase 3: Post-processing
@@ -771,6 +787,20 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.logger.info('📎 Click links below to access the attachments:')
 				for file_path in self.state.last_result[-1].attachments:
 					self.logger.info(f'👉 {file_path}')
+		self.state.history.history.append(
+			AgentHistory(
+				model_output=None,
+				result=[ActionResult(is_done=True, success=True)],
+				state=BrowserStateHistory(
+					url='',
+					title='',
+					tabs=[],
+					interacted_element=[],
+					screenshot=None,
+				),
+				metadata=None,
+			)
+		)					
 
 	async def _handle_step_error(self, error: Exception) -> None:
 		"""Handle all types of errors that can occur during a step"""
@@ -1117,6 +1147,25 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		"""
 		await self.step(step_info)
 
+		if not self.state.history.is_successful:
+			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
+			return True, False
+
+		#If the last result is a failure, then stop. If success can;t be decided, assume success
+		if self.state.last_result and self.state.last_result[-1].success is False: #None/True = Success
+			logger.error(f"Quitting... Peforming this action has failed: {self.state.last_result[-1]}")
+			return True, False
+
+		#If error in action, then stop
+		if self.state.last_result and self.state.last_result[-1].error:
+			logger.error(f"LAST STEP ERROR: {self.state.last_result[-1].error}")
+			if "rate limit" in self.state.last_result[-1].error.lower():
+				logger.warning("Rate limit error detected, waiting and retrying...")
+				await asyncio.sleep(self.settings.retry_delay)
+				return await self.take_step()
+			else:
+				return True, False
+			
 		if self.state.history.is_done():
 			await self.log_completion()
 			if self.register_done_callback:
@@ -1137,32 +1186,31 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		on_step_end: AgentHookFunc | None = None,
 	) -> AgentHistoryList[AgentStructuredOutput]:
 		"""Execute the task with maximum number of steps"""
+		if not self._is_initialized:
+			loop = asyncio.get_event_loop()
+			agent_run_error: str | None = None  # Initialize error tracking variable
+			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
 
-		loop = asyncio.get_event_loop()
-		agent_run_error: str | None = None  # Initialize error tracking variable
-		self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
+			# Set up the  signal handler with callbacks specific to this agent
+			from browser_use.utils import SignalHandler
 
-		# Set up the  signal handler with callbacks specific to this agent
-		from browser_use.utils import SignalHandler
+			# Define the custom exit callback function for second CTRL+C
+			def on_force_exit_log_telemetry():
+				self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
+				# NEW: Call the flush method on the telemetry instance
+				if hasattr(self, 'telemetry') and self.telemetry:
+					self.telemetry.flush()
+				self._force_exit_telemetry_logged = True  # Set the flag
 
-		# Define the custom exit callback function for second CTRL+C
-		def on_force_exit_log_telemetry():
-			self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
-			# NEW: Call the flush method on the telemetry instance
-			if hasattr(self, 'telemetry') and self.telemetry:
-				self.telemetry.flush()
-			self._force_exit_telemetry_logged = True  # Set the flag
+			signal_handler = SignalHandler(
+				loop=loop,
+				pause_callback=self.pause,
+				resume_callback=self.resume,
+				custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
+				exit_on_second_int=True,
+			)
+			signal_handler.register()
 
-		signal_handler = SignalHandler(
-			loop=loop,
-			pause_callback=self.pause,
-			resume_callback=self.resume,
-			custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
-			exit_on_second_int=True,
-		)
-		signal_handler.register()
-
-		try:
 			self._log_agent_run()
 
 			self.logger.debug(
@@ -1188,6 +1236,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.state.last_result = result
 				self.logger.debug('✅ Initial actions completed')
 
+		try:
 			self.logger.debug(f'🔄 Starting main execution loop with max {max_steps} steps...')
 			for step in range(max_steps):
 				# Replace the polling with clean pause-wait
@@ -1236,6 +1285,12 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				if on_step_end is not None:
 					await on_step_end(self)
 
+				if self.state.last_result and self.state.last_result[-1].success is False:  # None/True = Success
+					logger.error(
+						f'STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} | LAST RESULT: {self.state.last_result[-1]} '
+					)
+					break
+
 				if self.state.history.is_done():
 					self.logger.debug(f'🎯 Task completed after {step + 1} steps!')
 					await self.log_completion()
@@ -1267,6 +1322,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				)
 
 				self.logger.info(f'❌ {agent_run_error}')
+			# for i in range(current_completed_task_number):
+			# 	self.tasks_result.append((self.tasks[i], True))
+			# if len(self.tasks_result) < (len(self.tasks) - 1):# Add next one as failed task, if it is not the last one
+			# 	self.tasks_result.append((self.tasks[len(self.tasks_result)], False))
 
 			self.logger.debug('📊 Collecting usage summary...')
 			self.state.history.usage = await self.token_cost_service.get_usage_summary()

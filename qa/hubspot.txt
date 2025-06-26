@@ -1,0 +1,12 @@
+Go to https://www.hubspot.com/
+Click on Accept Cookies if prompted
+Click on Log In button/link
+Enter email hubspot_email and click Next
+Enter password hubspot_password and click Next
+If prompted for a verification code enter 111111 and click next/submit
+Verify that login succeeded
+If you see any popup, close it. 
+Click on CRM from the left panel then click on Contacts
+Verify that there are two contacts in the list 
+Click on CRM from the left panel then click on Companies
+Verify that there are two contacts in the list 

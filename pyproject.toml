@@ -80,7 +80,7 @@ eval = [
     "browserbase==1.4.0",
 ]
 all = [
-    "browser-use[cli,examples,aws]",
+    # "browser-use[memory,cli,examples]",  # Removed self-dependency
 ]
 
 # will prefer to use local source code checked out in ../../browser-use (if present) instead of pypi browser-use package
@@ -137,6 +137,7 @@ include = [
     "browser_use/agent/system_prompt_no_thinking.md",
     "browser_use/dom/**/*.js",
     "!tests/**/*.py",
+    "browser_use/agent/system_prompt_bugowl.md",
 ]
 
 [tool.pytest.ini_options]

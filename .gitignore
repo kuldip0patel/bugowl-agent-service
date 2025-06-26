@@ -22,7 +22,7 @@ dist/
 
 # Data files
 *.gif
-*.txt
+#*.txt
 *.pdf
 *.csv
 *.json
@@ -51,3 +51,7 @@ tmp
 # Google API credentials
 credentials.json
 token.json
+screenshots/
+videos/
+log/
+logs/

@@ -200,7 +200,6 @@ class Controller(Generic[Context]):
 					# Page navigated during click - refresh state and return it
 					logger.info('Page context changed during click, refreshing state...')
 					await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
-					raise BrowserError('Page navigated during click. Refreshed state provided.')
 				else:
 					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed')
 					raise BrowserError(error_msg)
@@ -303,8 +302,6 @@ class Controller(Generic[Context]):
 				include_in_memory=True,
 				long_term_memory=f'Closed tab {params.page_id} with url {url}, now focused on tab {new_page_idx} with url {new_page.url}.',
 			)
-
-		# Content Actions
 
 		@self.registry.action(
 			"""Extract structured, semantic data (e.g. product description, price, all information about XYZ) from the current webpage based on a textual query.
@@ -915,7 +912,8 @@ Explain the content of the page and that the requested information is not availa
 										tagName: select.tagName,
 										optionCount: select.options.length,
 										currentValue: select.value,
-										availableOptions: Array.from(select.options).map(o => o.text.trim())
+										availableOptions: Array.from(select.options).map(o => o.text ? o.text.trim() : '')
+
 									};
 								} catch (e) {
 									return {error: e.toString(), found: false};

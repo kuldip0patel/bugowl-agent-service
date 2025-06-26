@@ -1624,7 +1624,7 @@ class BrowserSession(BaseModel):
 						'windowId': window_id_result['windowId'],
 						'bounds': {
 							**self.browser_profile.window_size,
-							'windowState': 'normal',  # Ensure window is not minimized/maximized
+							'windowState': 'maximized',  # Ensure window is not minimized/maximized
 						},
 					},
 				)
@@ -2083,6 +2083,26 @@ class BrowserSession(BaseModel):
 							f'⚠️ Page {_log_pretty_url(page.url)} failed to finish loading after click: {type(e).__name__}: {e}'
 						)
 					await self._check_and_handle_navigation(page)
+			
+			# Handle navigation elements with expect_navigation
+			is_navigation_element = self._is_navigation_element(element_node)			
+			if is_navigation_element:
+				try:
+					# Use expect_navigation to handle navigation events properly
+					async with page.expect_navigation(timeout=10000, wait_until='domcontentloaded') as navigation_info:
+						await element_handle.click(timeout=1500)
+						# Small delay to ensure click completes before navigation
+						await asyncio.sleep(0.1)
+					
+					# Wait for the navigation to complete
+					await navigation_info.value
+					
+					# Check if navigation was successful
+					await self._check_and_handle_navigation(page)
+					return None  # Success
+				except Exception as nav_e:
+					self.logger.debug(f'Navigation click failed, falling back to regular click: {type(nav_e).__name__}: {nav_e}')
+					# Fall back to regular click handling
 
 			try:
 				return await perform_click(lambda: element_handle and element_handle.click(timeout=1_500))
@@ -4014,7 +4034,35 @@ class BrowserSession(BaseModel):
 				el.scrollBy({ top: dy, behavior: 'auto' });
 			}
 		}"""
-		await page.evaluate(SMART_SCROLL_JS, pixels)
+
+		SMART_SCROLL_CENTER_JS = """
+		(dy) => {
+			const x = window.innerWidth / 2;
+			const y = window.innerHeight / 2;
+			let el = document.elementFromPoint(x, y);
+
+			function isScrollable(e) {
+				if (!e) return false;
+				const style = getComputedStyle(e);
+				return /(auto|scroll|overlay)/.test(style.overflowY) && e.scrollHeight > e.clientHeight;
+			}
+
+			let scrollEl = el;
+			while (scrollEl && !isScrollable(scrollEl) && scrollEl !== document.body) {
+				scrollEl = scrollEl.parentElement;
+			}
+
+			if (!scrollEl || scrollEl === document.body || scrollEl === document.documentElement) {
+				window.scrollBy(0, dy);
+			} else {
+				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
+			}
+		}
+		"""
+
+		#await page.evaluate(SMART_SCROLL_JS, pixels)
+		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
+
 
 	# --- DVD Screensaver Loading Animation Helper ---
 	async def _show_dvd_screensaver_loading_animation(self, page: Page) -> None:
@@ -4125,6 +4173,96 @@ class BrowserSession(BaseModel):
 			}""",
 				str(self.id)[-4:],
 			)
+
+			await page.evaluate(
+				"""(browser_session_label) => {
+				const animated_title = `Setting up #${browser_session_label}...`;
+				if (document.title === animated_title) {
+					return;      // already run on this tab, dont run again
+				}
+				document.title = animated_title;
+
+				// Create the main overlay
+				const loadingOverlay = document.createElement('div');
+				loadingOverlay.id = 'pretty-loading-animation';
+				loadingOverlay.style.position = 'fixed';
+				loadingOverlay.style.top = '0';
+				loadingOverlay.style.left = '0';
+				loadingOverlay.style.width = '100vw';
+				loadingOverlay.style.height = '100vh';
+				loadingOverlay.style.background = '#fff';
+				loadingOverlay.style.zIndex = '99999';
+				loadingOverlay.style.overflow = 'hidden';
+
+				// Create the image element
+				const img = document.createElement('img');
+				img.src = 'https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
+				img.alt = 'Browser-Use';
+				img.style.width = '200px';
+				img.style.height = 'auto';
+				img.style.position = 'absolute';
+				img.style.left = '0px';
+				img.style.top = '0px';
+				img.style.zIndex = '2';
+				img.style.opacity = '0.8';
+
+				loadingOverlay.appendChild(img);
+				document.body.appendChild(loadingOverlay);
+
+				// DVD screensaver bounce logic
+				let x = Math.random() * (window.innerWidth - 300);
+				let y = Math.random() * (window.innerHeight - 300);
+				let dx = 1.2 + Math.random() * 0.4; // px per frame
+				let dy = 1.2 + Math.random() * 0.4;
+				// Randomize direction
+				if (Math.random() > 0.5) dx = -dx;
+				if (Math.random() > 0.5) dy = -dy;
+
+				x = window.innerWidth / 2;
+				y = 100;
+				dy = 0;  // vertical velocity
+				const gravity = 0.2;
+				const damping = 0.8;
+
+				// Add this at the top with other variables
+				let angle = 0;
+				const radius = 100;
+				const centerX = window.innerWidth / 2;
+				const centerY = window.innerHeight / 2;
+
+				function animate() {
+					angle += 0.01;
+					x = centerX + Math.cos(angle) * radius - img.offsetWidth/2;
+					y = centerY + Math.sin(angle) * radius - img.offsetHeight/2;
+					
+					img.style.left = `${x}px`;
+					img.style.top = `${y}px`;
+					requestAnimationFrame(animate);
+				}
+
+				animate();
+
+				// Responsive: update bounds on resize
+				window.addEventListener('resize', () => {
+					x = Math.min(x, window.innerWidth - img.offsetWidth);
+					y = Math.min(y, window.innerHeight - img.offsetHeight);
+				});
+
+				// Add a little CSS for smoothness
+				const style = document.createElement('style');
+				style.innerHTML = `
+					#pretty-loading-animation {
+						/*backdrop-filter: blur(2px) brightness(0.9);*/
+					}
+					#pretty-loading-animation img {
+						user-select: none;
+						pointer-events: none;
+					}
+				`;
+				document.head.appendChild(style);
+			}""",
+				str(self.id)[-4:],
+			)			
 		except Exception as e:
 			self.logger.debug(f'❌ Failed to show 📀 DVD loading animation: {type(e).__name__}: {e}')
 
@@ -4290,3 +4428,40 @@ class BrowserSession(BaseModel):
 		except Exception as e:
 			self.logger.warning(f'⚠️ Error in PDF auto-download check: {type(e).__name__}: {e}')
 			return None
+
+	def _is_navigation_element(self, element_node: DOMElementNode) -> bool:
+		"""
+		Check if an element is likely to cause navigation when clicked.
+		"""
+		attributes = element_node.attributes or {}
+		
+		# Check for href attribute (links)
+		if 'href' in attributes and attributes['href']:
+			href = attributes['href']
+			# Skip javascript: and # links
+			if not href.startswith('javascript:') and not href.startswith('#'):
+				return True
+		
+		# Check for form submission elements
+		if element_node.tag_name.lower() in ['button', 'input']:
+			button_type = attributes.get('type', '').lower()
+			if button_type in ['submit']:
+				return True
+		
+		# Check for onclick handlers that might cause navigation
+		if 'onclick' in attributes:
+			onclick = attributes['onclick'].lower()
+			if any(nav_keyword in onclick for nav_keyword in ['location', 'window.open', 'navigate', 'redirect']):
+				return True
+		
+		# Check for data attributes that might indicate navigation
+		if any(attr.startswith('data-') and 'nav' in attr.lower() for attr in attributes.keys()):
+			return True
+		
+		# Check for common navigation-related classes
+		classes = attributes.get('class', '').lower()
+		nav_classes = ['nav', 'navigation', 'menu', 'link', 'button', 'tab']
+		if any(nav_class in classes for nav_class in nav_classes):
+			return True
+		
+		return False
