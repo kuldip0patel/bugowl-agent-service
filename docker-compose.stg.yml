@@ -1,0 +1,63 @@
+version: '3.8'
+
+volumes:
+  static_volume:
+  logs_volume:
+
+services:
+  redis:
+    image: redis
+    command: redis-server --port 6381
+    ports:
+      - 6381:6381
+    networks:
+      - app-network
+
+  api:
+    build: .
+    command: sh entrypoint.sh
+    env_file:
+      - .env
+    volumes:
+      - static_volume:/app/staticfiles
+      - logs_volume:/logs
+      - /var/log:/logs
+      - .:/app:delegated
+    ports:
+      - 8020:8020
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "on-failure"
+    networks:
+      - app-network
+
+  celery:
+    restart: always
+    build: .
+    command: sh -c "celery -A api purge -f  && celery -A api worker -l info"
+    env_file:
+      - .env
+    volumes:
+      - .:/app:delegated
+      - logs_volume:/logs
+      - /var/log:/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app-network
+
+  websocket:
+    build: .
+    command: sh websocket_entrypoint.sh
+    env_file:
+      - .env
+    ports:
+      - 7020:7020
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
