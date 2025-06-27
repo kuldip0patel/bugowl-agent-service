@@ -31,7 +31,7 @@ services:
     networks:
       - app-network
 
-  celery:
+  celery: 
     build: .
     command: celery -A api.celery worker -l info
     env_file:
