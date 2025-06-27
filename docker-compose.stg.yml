@@ -6,7 +6,7 @@ volumes:
 
 services:
   redis:
-    image: redis
+    image: redis 
     command: redis-server --port 6381
     ports:
       - 6381:6381
