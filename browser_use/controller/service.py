@@ -200,16 +200,17 @@ class Controller(Generic[Context]):
 					# Page navigated during click - refresh state and return it
 					logger.info('Page navigated during click, refreshing state...')  # Changed from error to info
 					await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
+					# Get element text for better reporting
+					element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else 'Unknown'
+					element_tag = element_node.tag_name if element_node else 'unknown'					
+					msg = f"Clicked {element_tag} with index {params.index}: '{element_text}' | Page navigated successfully (context destroyed during navigation)."
+					return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 				else:
-					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed')
-					return ActionResult(
-						extracted_content='Page navigated successfully. Refreshed state provided.', 
-						include_in_memory=True, 
-						success=True,  # Changed from False to True since navigation is successful
-						long_term_memory='Successfully navigated to new page',
-						is_done=True
+					logger.warning(
+						f'Element not clickable with index {params.index} - most likely the page changed', exc_info=True
 					)
-				
+					return ActionResult(error=error_msg, success=False)
+
 		@self.registry.action(
 			'Click and input text into a input interactive element',
 			param_model=InputTextAction,

@@ -4075,22 +4075,28 @@ class BrowserSession(BaseModel):
 				/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
 				el.scrollHeight > el.clientHeight &&
 				bigEnough(el);
+	async def _scroll_container(self, pixels: int) -> None:
+		SMART_SCROLL_CENTER_JS = """
+		(dy) => {
+			const x = window.innerWidth / 2;
+			const y = window.innerHeight / 2;
+			let el = document.elementFromPoint(x, y);
 
-			let el = document.activeElement;
-			while (el && !canScroll(el) && el !== document.body) el = el.parentElement;
+			function isScrollable(e) {
+				if (!e) return false;
+				const style = getComputedStyle(e);
+				return /(auto|scroll|overlay)/.test(style.overflowY) && e.scrollHeight > e.clientHeight;
+			}
 
-			el = canScroll(el)
-					? el
-					: [...document.querySelectorAll('*')].find(canScroll)
-					|| document.scrollingElement
-					|| document.documentElement;
+			let scrollEl = el;
+			while (scrollEl && !isScrollable(scrollEl) && scrollEl !== document.body) {
+				scrollEl = scrollEl.parentElement;
+			}
 
-			if (el === document.scrollingElement ||
-				el === document.documentElement ||
-				el === document.body) {
+			if (!scrollEl || scrollEl === document.body || scrollEl === document.documentElement) {
 				window.scrollBy(0, dy);
 			} else {
-				el.scrollBy({ top: dy, behavior: 'auto' });
+				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
 			}
 		}"""
 
@@ -4122,6 +4128,10 @@ class BrowserSession(BaseModel):
 		#await page.evaluate(SMART_SCROLL_JS, pixels)
 		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
 
+		}
+		"""
+		page = await self.get_current_page()
+		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
 
 	# --- DVD Screensaver Loading Animation Helper ---
 	async def _show_dvd_screensaver_loading_animation(self, page: Page) -> None:
