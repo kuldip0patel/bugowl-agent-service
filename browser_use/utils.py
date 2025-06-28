@@ -589,7 +589,7 @@ def _log_pretty_url(s: str, max_len: int | None = 22) -> str:
 		return s[:max_len] + '…'
 	return s
 
-async def save_failure_screenshot(browser_context, task_number: int) -> str | None:
+async def save_failure_screenshot(browser_session, task_id: str) -> str | None:
 	"""
 	Take a screenshot of the current browser state and save it to a file.
 	
@@ -603,12 +603,12 @@ async def save_failure_screenshot(browser_context, task_number: int) -> str | No
 	import base64
 	from datetime import datetime
 	try:
-		screenshot_b64 = await browser_context.take_screenshot(full_page=True)
+		screenshot_b64 = await browser_session.get_current_page().take_screenshot(full_page=True)
 		# Create screenshots directory if it doesn't exist
 		os.makedirs('screenshots', exist_ok=True)
 		# Generate filename with timestamp and task number
 		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-		filename = f'screenshots/failure_task{task_number}_{timestamp}.png'
+		filename = f'screenshots/failure_task_{task_id}_{timestamp}.png'
 		# Save the screenshot
 		with open(filename, 'wb') as f:
 			f.write(base64.b64decode(screenshot_b64))

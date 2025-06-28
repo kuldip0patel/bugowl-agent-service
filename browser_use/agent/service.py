@@ -711,7 +711,7 @@ class Agent(Generic[Context]):
 			input_messages = self._message_manager.get_messages()
 
 			try:
-				self.logger.info(f'\n\n--------------------------------------\n🧠 Invoking LLM: {self.llm.provider} / {self.llm.model}\n--------------------------------------')
+				self.logger.info(f'------------------- 🧠 Invoking LLM: {self.llm.provider} / {self.llm.model} -------------------\n')
 				start_time = time.time()
 				model_output = await self.get_next_action(input_messages)
 				elapsed = time.time() - start_time
@@ -1100,10 +1100,14 @@ class Agent(Generic[Context]):
 		        Tuple[bool, bool]: (is_done, is_valid)
 		"""
 		await self.step()
-
 		if not self.state.history.is_successful:
 			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
 			return True, False
+
+		if self.state.last_result and self.state.last_result[-1].success == False: #True/None are pass.
+			logger.error(f"Quitting... Peforming this action has failed: {self.state.last_result[-1]}")
+			return True, False
+
 
 		#If error in action, then stop
 		if self.state.last_result and self.state.last_result[-1].error:
@@ -1231,13 +1235,13 @@ class Agent(Generic[Context]):
 				# 			break
 
 
-				# if self.state.last_result and self.state.last_result[-1].error:
-				# 	from browser_use.utils import save_failure_screenshot
-				# 	logger.error(f"STEP failed: {step_info}. with error: {self.state.last_result[-1].error} FAILED TASK NUMBER :{current_completed_task_number+1} ")
-				# 	# Take a screenshot of the failed state
-				# 	await save_failure_screenshot(self.browser_context, current_completed_task_number + 1)						
-				# 	#self.pause()
-				# 	break
+				if self.state.last_result and self.state.last_result[-1].success == False:#True/None == successful
+					from browser_use.utils import save_failure_screenshot
+					logger.error(f"STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} ")
+					# Take a screenshot of the failed state
+					await save_failure_screenshot(self.browser_session, self.task_id)						
+					#self.pause()
+					break
 				if self.state.history.is_done():
 					await self.log_completion()
 
