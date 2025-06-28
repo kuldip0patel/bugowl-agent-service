@@ -38,12 +38,13 @@ def read_tasks(my_file_path):
         return tasks
         
     try:
+        print(f"ALL TASKS:")
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line:  # Skip empty lines
                     tasks.append(line)
-        print(f"ALL TASKS:\n{tasks}")
+                    print(f"\033[93m ▶▶ {line} ▶▶\033[0m")
         return tasks
     except Exception as e:
         print(f"Error reading baya.txt: {e}")
@@ -57,7 +58,7 @@ async def run_tasks(tasks: list[str]):
         tasks: List of tasks to execute
     """
     llm = ChatOpenAI(model="gpt-4o")
-    llm = ChatOpenAI(model="gpt-4.1-nano")
+    #llm = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
 
 
 # Detect the screen size
@@ -95,18 +96,15 @@ async def run_tasks(tasks: list[str]):
 
     my_browser = BrowserSession(browser_profile=browser_profile)
 
-    await my_browser.start()        
+    await my_browser.start()
     print("BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....")
-    import time
-    time.sleep(2)
+
     # Load sensitive data from environment variables
     sensitive_data = {
-        "baya_password": "Baya@1234",
+        "baya_password": "Baya@12345",
         "hubspot_email": os.getenv("HUBSPOT_EMAIL"),
         "hubspot_password": os.getenv("HUBSPOT_PASSWORD"),
     }
-    print(sensitive_data)
-
     run_tasks_one_by_one = True
     # tasks_list = []
     # if not run_tasks_one_by_one:
@@ -125,6 +123,7 @@ async def run_tasks(tasks: list[str]):
             if not agent:
                 agent = Agent(
                             task=task,
+                            task_id=str(uuid.uuid4()),
                             llm=llm,
                             browser_session=my_browser,
                             # page=page,
@@ -135,23 +134,23 @@ async def run_tasks(tasks: list[str]):
                             enable_memory=False,
                             save_conversation_path="logs/conversation",  # Save chat logs
                             use_vision=True,
-                            # sensitive_data=sensitive_data,
+                            sensitive_data=sensitive_data,
                             cloud_sync=None,
                             use_thinking=False,
                 )
             else:
                 is_final_task = True if count == len(task) else False
                 agent.add_new_task(task)
-            print(f"BUGOWL: Executing task {count} : {task}")
+            print(f"\033[94mBUGOWL: Executing Task #{count} ▶ : {task}\033[0m")
             history = await agent.run()
             output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
-            print(f"BUGOWL: {task} : {output}")
+            print(f"\033[94mBUGOWL: {task} : {output}\033[0m")
             res = (task, output)
             results.append(res)
             if not history.is_successful():
                 break
         for res in results:
-            print(res)
+            print(f"\033[94m{res}\033[0m")
     else:
         print("BUGOWL: Running all tasks together")
         agent = Agent(

@@ -97,7 +97,6 @@ def log_response(response: AgentOutput, registry=None, logger=None) -> None:
 	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
 	logger.info(f'🧠 Memory: {response.current_state.memory}')
 	logger.info(f'🎯 Next goal: {response.current_state.next_goal}\n')
-	logger.info(f'📝 LLM Output: {response}')
 
 
 Context = TypeVar('Context')
@@ -113,7 +112,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	@time_execution_sync('--init')
 	def __init__(
 		self,
-		# tasks: list[str],
 		task: str,
 		llm: BaseChatModel,
 		# Optional parameters
@@ -221,7 +219,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self.controller.use_structured_output_action(self.output_model_schema)
 
 		self.sensitive_data = sensitive_data
-		self.tasks_result = []
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -248,6 +245,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			calculate_cost=calculate_cost,
 			include_tool_call_examples=include_tool_call_examples,
 		)
+
 		# Token cost service
 		self.token_cost_service = TokenCost(include_cost=calculate_cost)
 		self.token_cost_service.register_llm(llm)
@@ -295,8 +293,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 		# Initialize message manager with state
 		# Initial system prompt with all actions - will be updated during each step
-		
-		# task_str = json.dumps({'tasks': tasks})
 		self._message_manager = MessageManager(
 			task=task,
 			system_message=SystemPrompt(
@@ -627,7 +623,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		# The task continues with new instructions, it doesn't end and start a new one
 		self.task = new_task
 		self._message_manager.add_new_task(new_task)
-		# self._is_final_task = is_final_task
 
 	async def _raise_if_stopped_or_paused(self) -> None:
 		"""Utility function that raises an InterruptedError if the agent is stopped or paused."""
@@ -1146,10 +1141,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		        Tuple[bool, bool]: (is_done, is_valid)
 		"""
 		await self.step(step_info)
-
 		if not self.state.history.is_successful:
 			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
 			return True, False
+
+		if self.state.last_result and self.state.last_result[-1].success == False: #True/None are pass.
+			logger.error(f"Quitting... Peforming this action has failed: {self.state.last_result[-1]}")
+			return True, False
+
 
 		#If the last result is a failure, then stop. If success can;t be decided, assume success
 		if self.state.last_result and self.state.last_result[-1].success is False: #None/True = Success
@@ -1187,6 +1186,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	) -> AgentHistoryList[AgentStructuredOutput]:
 		"""Execute the task with maximum number of steps"""
 		if not self._is_initialized:
+
 			loop = asyncio.get_event_loop()
 			agent_run_error: str | None = None  # Initialize error tracking variable
 			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
