@@ -94,14 +94,14 @@ async def run_tasks(tasks: list[str]):
     # # cleanup_task = await setup_network_monitoring(page)
     # browser = browser_session.browser
 
-    my_browser = BrowserSession(browser_profile=browser_profile)
+    my_browser_session = BrowserSession(browser_profile=browser_profile)
 
-    await my_browser.start()
+    await my_browser_session.start()
     print("BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....")
 
     # Load sensitive data from environment variables
     sensitive_data = {
-        "baya_password": "Baya@12345",
+        "baya_password": os.getenv("BAYA_PASSWORD"),
         "hubspot_email": os.getenv("HUBSPOT_EMAIL"),
         "hubspot_password": os.getenv("HUBSPOT_PASSWORD"),
     }
@@ -120,12 +120,13 @@ async def run_tasks(tasks: list[str]):
         count = 0
         for task in tasks:
             count = count + 1
+            task_id = str(uuid.uuid4())
             if not agent:
                 agent = Agent(
                             task=task,
-                            task_id=str(uuid.uuid4()),
+                            task_id=task_id,
                             llm=llm,
-                            browser_session=my_browser,
+                            browser_session=my_browser_session,
                             # page=page,
                             # browser=browser,
                             # browser_context=browser_context,
@@ -148,6 +149,9 @@ async def run_tasks(tasks: list[str]):
             res = (task, output)
             results.append(res)
             if not history.is_successful():
+                # Take a screenshot of the failed state
+                from browser_use.utils import save_failure_screenshot
+                await save_failure_screenshot(my_browser_session, task_id)						
                 break
         for res in results:
             print(f"\033[94m{res}\033[0m")
