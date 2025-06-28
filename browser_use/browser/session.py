@@ -3284,36 +3284,32 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def _scroll_container(self, pixels: int) -> None:
-		"""Scroll the element that truly owns vertical scroll.Starts at the focused node ➜ climbs to the first big, scroll-enabled ancestor otherwise picks the first scrollable element or the root, then calls `element.scrollBy` (or `window.scrollBy` for the root) by the supplied pixel value."""
+		SMART_SCROLL_CENTER_JS = """
+		(dy) => {
+			const x = window.innerWidth / 2;
+			const y = window.innerHeight / 2;
+			let el = document.elementFromPoint(x, y);
 
-		# An element can *really* scroll if: overflow-y is auto|scroll|overlay, it has more content than fits, its own viewport is not a postage stamp (more than 50 % of window).
-		SMART_SCROLL_JS = """(dy) => {
-			const bigEnough = el => el.clientHeight >= window.innerHeight * 0.5;
-			const canScroll = el =>
-				el &&
-				/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
-				el.scrollHeight > el.clientHeight &&
-				bigEnough(el);
+			function isScrollable(e) {
+				if (!e) return false;
+				const style = getComputedStyle(e);
+				return /(auto|scroll|overlay)/.test(style.overflowY) && e.scrollHeight > e.clientHeight;
+			}
 
-			let el = document.activeElement;
-			while (el && !canScroll(el) && el !== document.body) el = el.parentElement;
+			let scrollEl = el;
+			while (scrollEl && !isScrollable(scrollEl) && scrollEl !== document.body) {
+				scrollEl = scrollEl.parentElement;
+			}
 
-			el = canScroll(el)
-					? el
-					: [...document.querySelectorAll('*')].find(canScroll)
-					|| document.scrollingElement
-					|| document.documentElement;
-
-			if (el === document.scrollingElement ||
-				el === document.documentElement ||
-				el === document.body) {
+			if (!scrollEl || scrollEl === document.body || scrollEl === document.documentElement) {
 				window.scrollBy(0, dy);
 			} else {
-				el.scrollBy({ top: dy, behavior: 'auto' });
+				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
 			}
-		}"""
+		}
+		"""
 		page = await self.get_current_page()
-		await page.evaluate(SMART_SCROLL_JS, pixels)
+		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
 
 	# --- DVD Screensaver Loading Animation Helper ---
 	async def _show_dvd_screensaver_loading_animation(self, page: Page) -> None:

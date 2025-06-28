@@ -4,5 +4,12 @@ Enter password baya_password
 Click Submit button
 Verify that "Adidas Pvt Ltd" is visible
 Click on "Customers" and verify if a grid of customers is visible
-Now Click on "Contracts" and verify that there are no contracts on the page.
-Close the browser window
+Go to https://dashboard-stg.baya.biz/buyers/new
+Now enter any random Indian GST Number in valid format
+Click on Verify GST Details
+Enter phone number 9004179876
+Type email kuldip+qa@baya.biz
+Enter "Sale agent" in about the customer field
+Select India as a country
+Click Save 
+Verify that the customer is successfully added.
