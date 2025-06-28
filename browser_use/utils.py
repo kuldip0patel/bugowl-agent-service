@@ -594,8 +594,8 @@ async def save_failure_screenshot(browser_session, task_id: str) -> str | None:
 	Take a screenshot of the current browser state and save it to a file.
 	
 	Args:
-		browser_context: The browser context to take the screenshot from
-		task_number: The task number to include in the filename
+		browser_session: The browser session to take the screenshot from
+		task_id: The task ID to include in the filename
 		
 	Returns:
 		str: The path to the saved screenshot file, or None if saving failed
@@ -603,7 +603,7 @@ async def save_failure_screenshot(browser_session, task_id: str) -> str | None:
 	import base64
 	from datetime import datetime
 	try:
-		screenshot_b64 = await browser_session.get_current_page().take_screenshot(full_page=True)
+		screenshot_b64 = await browser_session.take_screenshot(full_page=True)
 		# Create screenshots directory if it doesn't exist
 		os.makedirs('screenshots', exist_ok=True)
 		# Generate filename with timestamp and task number

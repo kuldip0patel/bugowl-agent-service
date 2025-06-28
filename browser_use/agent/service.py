@@ -1236,10 +1236,10 @@ class Agent(Generic[Context]):
 
 
 				if self.state.last_result and self.state.last_result[-1].success == False:#True/None == successful
-					from browser_use.utils import save_failure_screenshot
-					logger.error(f"STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} ")
+					logger.error(f"STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} | LAST RESULT: {self.state.last_result[-1]} ")
 					# Take a screenshot of the failed state
-					await save_failure_screenshot(self.browser_session, self.task_id)						
+					# from browser_use.utils import save_failure_screenshot
+					# await save_failure_screenshot(self.browser_session, self.task_id)						
 					#self.pause()
 					break
 				if self.state.history.is_done():
