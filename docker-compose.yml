@@ -15,7 +15,8 @@ services:
 
   api:
     build: .
-    command: sh entrypoint.sh
+    entrypoint: sh
+    command:  entrypoint.sh
     env_file:
       - .env
     volumes:
@@ -39,20 +40,6 @@ services:
     volumes:
       - .:/app:delegated
       - logs_volume:/logs
-    links:
-      - redis
-    depends_on:
-      - redis
-    networks:
-      - app-network
-
-  websocket:
-    build: .
-    command: sh websocket_entrypoint.sh
-    env_file:
-      - .env
-    ports:
-      - 7020:7020
     links:
       - redis
     depends_on:

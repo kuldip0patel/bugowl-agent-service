@@ -71,6 +71,23 @@ ENV CODE_DIR=/app \
     DATA_DIR=/data \
     VENV_DIR=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
+    
+ENV PYTHONUNBUFFERED=1
+
+# Add AWS Arguments and Environment Variables
+ARG AWS_ACCESS_KEY_ID
+ARG AWS_SECRET_ACCESS_KEY
+ARG AWS_SECRET_NAME
+ARG AWS_REGION_NAME
+ARG AWS_IAM_ROLE
+
+ENV AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+ENV AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+ENV AWS_SECRET_NAME=$AWS_SECRET_NAME
+ENV AWS_REGION_NAME=$AWS_REGION_NAME
+ENV AWS_IAM_ROLE=$AWS_IAM_ROLE
+ENV DJANGO_SETTINGS_MODULE=api.settings
+ENV PYTHONPATH=/app:/app/bugowl/bugowl_websocket
 
 # Build shell config
 SHELL ["/bin/bash", "-o", "pipefail", "-o", "errexit", "-o", "errtrace", "-o", "nounset", "-c"] 
@@ -211,12 +228,37 @@ RUN mkdir -p "$DATA_DIR/profiles/default" \
     ) | tee -a /VERSION.txt
 
 
+
+
+# Create necessary directories
+RUN mkdir -p /app/logs && \
+    mkdir -p /app/staticfiles && \
+    mkdir -p /app/media && \
+    mkdir -p /logs && \
+    touch /logs/django.log && \
+    chmod -R 777 /app/logs && \
+    chmod -R 777 /logs
+
+
+COPY entrypoint.sh /app/
+# Convert line endings and set permissions
+RUN sed -i 's/\r$//' /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+RUN ["apt-get", "update"]
+RUN ["apt-get", "install", "-y", "vim"]
+
+
 USER "$BROWSERUSE_USER"
 VOLUME "$DATA_DIR"
+EXPOSE 8010
+EXPOSE 8020
 EXPOSE 9242
 EXPOSE 9222
 
-# HEALTHCHECK --interval=30s --timeout=20s --retries=15 \
-#     CMD curl --silent 'http://localhost:8000/health/' | grep -q 'OK'
+
 
 ENTRYPOINT ["browser-use"]

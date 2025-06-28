@@ -46,18 +46,6 @@ services:
     networks:
       - app-network
 
-  websocket:
-    build: .
-    command: sh websocket_entrypoint.sh
-    env_file:
-      - .env
-    ports:
-      - 7020:7020
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - app-network
-
 networks:
   app-network:
     driver: bridge
