@@ -1,4 +1,4 @@
-from browser_use.llm import ChatOpenAI
+from browser_use.llm import ChatOpenAI, ChatGoogle
 from browser_use import Agent
 import asyncio
 from dotenv import load_dotenv
@@ -57,8 +57,10 @@ async def run_tasks(tasks: list[str]):
     Args:
         tasks: List of tasks to execute
     """
-    llm = ChatOpenAI(model="gpt-4o")
-    #llm = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
+    llm_openai = ChatOpenAI(model="gpt-4o")
+    #llm_openai = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
+    llm_google = ChatGoogle(model="gemini-2.5-flash")
+    llm = llm_google
 
 
 # Detect the screen size
