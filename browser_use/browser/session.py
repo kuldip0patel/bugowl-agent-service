@@ -2769,10 +2769,10 @@ class BrowserSession(BaseModel):
 
 		if bytes_used is not None:
 			self.logger.info(
-				f'➡️ Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} used {bytes_used / 1024:.1f} KB in {elapsed:.2f}s{extra_delay}'
+				f'🌐🌐 Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} used {bytes_used / 1024:.1f} KB in {elapsed:.2f}s{extra_delay}'
 			)
 		else:
-			self.logger.info(f'➡️ Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} took {elapsed:.2f}s{extra_delay}')
+			self.logger.info(f'🌐🌐 Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} took {elapsed:.2f}s{extra_delay}')
 
 		# Sleep remaining time if needed
 		if remaining > 0:

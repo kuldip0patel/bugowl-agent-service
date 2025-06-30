@@ -16,6 +16,36 @@ from browser_use.browser import BrowserProfile
 
 load_dotenv()
 
+def get_chrome_args_for_automation():
+    """Get Chrome arguments optimized for web automation without prompts"""
+    return [
+        # Disable password manager and autofill prompts
+        "--disable-password-manager-reauthentication",
+        "--disable-features=PasswordManager,AutofillServerCommunication",
+        "--disable-save-password-bubble",
+
+        # Disable other common prompts and notifications
+        "--disable-notifications",
+        "--disable-infobars",
+        "--disable-translate",
+        "--disable-popup-blocking",
+        "--disable-default-apps",
+        "--disable-extensions-http-throttling",
+
+        # Disable location and media prompts
+        "--disable-geolocation",
+        "--disable-media-stream",
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+
+        # Additional stability flags
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-background-timer-throttling",
+    ]
+
 def parse_args():
     parser = argparse.ArgumentParser(description='UI Automation Agent')
     parser.add_argument('file_path', type=str, help='Path to the input txt file')
@@ -59,7 +89,7 @@ async def run_tasks(tasks: list[str]):
     #llm_openai = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
     llm_google = ChatGoogle(model="gemini-2.5-flash")
     llm = llm_openai
-    llm = llm_google
+    #llm = llm_google
 
 
 # Detect the screen size
@@ -69,7 +99,7 @@ async def run_tasks(tasks: list[str]):
     browser_profile = BrowserProfile(
         viewport=None,
         keep_alive=True,
-        headless=False,
+        headless=True,
         disable_security=False,
         highlight_elements=False,
         record_video_dir="videos/",
@@ -77,6 +107,7 @@ async def run_tasks(tasks: list[str]):
         window_size=screen_size,  # This will open the window maximized to the screen
         user_data_dir=str(Path.home() / ".config" / "browseruse" / "profiles" / f"profile_{uuid.uuid4()}"),
         # viewport_expansion=-1,
+        args=get_chrome_args_for_automation()
     )
 
     my_browser_session = BrowserSession(browser_profile=browser_profile)
@@ -109,7 +140,7 @@ async def run_tasks(tasks: list[str]):
                         # browser_context=browser_context,
                         # browser_profile=browser_profile,
                         # browser_session=browser_session,
-                        enable_memory=False,
+                        enable_memory=True,
                         save_conversation_path="logs/conversation",  # Save chat logs
                         use_vision=True,
                         sensitive_data=sensitive_data,

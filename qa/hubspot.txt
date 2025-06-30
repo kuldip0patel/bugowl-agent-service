@@ -2,7 +2,7 @@ Go to https://www.hubspot.com/
 Click on Accept Cookies if prompted
 Click on Log In button/link
 Enter email hubspot_email and click Next
-Enter password hubspot_password and click Next
+Enter password hubspot_password and click Login
 If prompted for a verification code enter 111111 and click next/submit
 Verify that login succeeded
 If you see any popup, close it. 
