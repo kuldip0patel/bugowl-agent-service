@@ -710,7 +710,7 @@ class Agent(Generic[Context]):
 			input_messages = self._message_manager.get_messages()
 
 			try:
-				self.logger.info(f'------------------- 🧠 Invoking LLM: {self.llm.provider} / {self.llm.model} -------------------\n')
+				self.logger.info(f'---------- 🧠 Invoking LLM: {self.llm.provider} / {self.llm.model} ----------\n')
 				start_time = time.time()
 				model_output = await self.get_next_action(input_messages)
 				elapsed = time.time() - start_time

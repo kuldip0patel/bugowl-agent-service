@@ -3371,32 +3371,33 @@ class BrowserSession(BaseModel):
 			if (Math.random() > 0.5) dx = -dx;
 			if (Math.random() > 0.5) dy = -dy;
 
+			x = window.innerWidth / 2;
+			y = 100;
+			dy = 0;  // vertical velocity
+			const gravity = 0.2;
+			const damping = 0.8;
+
 			function animate() {
-				const imgWidth = img.offsetWidth || 300;
-				const imgHeight = img.offsetHeight || 300;
-				x += dx;
+				dy += gravity;
 				y += dy;
-
-				if (x <= 0) {
-					x = 0;
-					dx = Math.abs(dx);
-				} else if (x + imgWidth >= window.innerWidth) {
-					x = window.innerWidth - imgWidth;
-					dx = -Math.abs(dx);
+				
+				// Floor collision
+				if (y + img.offsetHeight > window.innerHeight) {
+					y = window.innerHeight - img.offsetHeight;
+					dy = -dy * damping;
 				}
-				if (y <= 0) {
+				
+				// Ceiling collision (optional)
+				if (y < 0) {
 					y = 0;
-					dy = Math.abs(dy);
-				} else if (y + imgHeight >= window.innerHeight) {
-					y = window.innerHeight - imgHeight;
-					dy = -Math.abs(dy);
+					dy = -dy * damping;
 				}
-
-				img.style.left = `${x}px`;
+				
+				img.style.left = `${x - img.offsetWidth/2}px`;
 				img.style.top = `${y}px`;
-
 				requestAnimationFrame(animate);
 			}
+
 			animate();
 
 			// Responsive: update bounds on resize
