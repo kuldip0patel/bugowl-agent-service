@@ -745,8 +745,6 @@ class Agent(Generic[Context]):
 				# Check again for paused/stopped state after getting model output
 				await self._raise_if_stopped_or_paused()
 
-				self.state.n_steps += 1
-
 				if self.register_new_step_callback:
 					if inspect.iscoroutinefunction(self.register_new_step_callback):
 						await self.register_new_step_callback(browser_state_summary, model_output, self.state.n_steps)
@@ -797,14 +795,30 @@ class Agent(Generic[Context]):
 				except Exception as e:
 					self.logger.debug(f'📁 Failed to check for new downloads: {type(e).__name__}: {e}')
 
-			if len(result) > 0 and result[-1].is_done:
+			# if len(result) > 0 and result[-1].is_done:
+			if len(result) > 0 and not result[-1].error:
 				self.logger.info(f'📄 Result: {result[-1].extracted_content}')
 				if result[-1].attachments:
 					self.logger.info('📎 Click links below to access the attachments:')
 					for file_path in result[-1].attachments:
 						self.logger.info(f'👉 {file_path}')
+				self.state.history.history.append(
+					AgentHistory(
+						model_output=None,
+						result=[ActionResult(is_done=True, success=True)],
+						state=BrowserStateHistory(
+							url='',
+							title='',
+							tabs=[],
+							interacted_element=[],
+							screenshot=None,
+						),
+						metadata=None,
+					)
+				)
 
 			self.state.consecutive_failures = 0
+
 
 		except InterruptedError:
 			# self.logger.debug('Agent paused')
@@ -852,6 +866,8 @@ class Agent(Generic[Context]):
 				# Emit CreateAgentStepEvent
 				step_event = CreateAgentStepEvent.from_agent_step(self, model_output, result, actions_data, browser_state_summary)
 				self.eventbus.dispatch(step_event)
+		self.state.n_steps += 1
+
 
 	@time_execution_async('--handle_step_error (agent)')
 	async def _handle_step_error(self, error: Exception) -> list[ActionResult]:
@@ -1181,7 +1197,7 @@ class Agent(Generic[Context]):
 				result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
 				self.state.last_result = result
 			#self._is_initialized = True
-			logger.info(f"AGENT IS INITIALISED!!!")
+			#logger.info(f"AGENT IS INITIALISED!!!")
 
 		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
 		try:
@@ -1412,6 +1428,7 @@ class Agent(Generic[Context]):
 				action_params = getattr(action, action_name, '')
 				self.logger.info(f'☑️ Executed action {i + 1}/{len(actions)}: {action_name}({action_params})')
 				if results[-1].is_done or results[-1].error or i == len(actions) - 1:
+					logger.info(f"Breaking Actions Loop because the last result is... done?: { results[-1].is_done} | error?:{results[-1].error} ")
 					break
 
 				await asyncio.sleep(self.browser_profile.wait_between_actions)
