@@ -60,10 +60,11 @@ ALLOWED_HOSTS = [
 	'stg.helpchat.social',
 	'13.233.47.250',
 	'stg.bugowl.helpchat.social',
+	'stg-bugowl.vercel.app',
 ]
 
 
-CSRF_TRUSTED_ORIGINS = [
+ALLOWED_ORIGINS = [
 	'https://stg.bugowl.helpchat.social',
 	'https://bugowl.helpchat.social',
 	'http://localhost:8010',
@@ -72,20 +73,14 @@ CSRF_TRUSTED_ORIGINS = [
 	'https://stg.bugowl.ai',
 	'http://localhost:3000',
 	'https://v0-bug-owl.vercel.app',
+	'https://stg-bugowl.vercel.app',
 ]
+
+CSRF_TRUSTED_ORIGINS = ALLOWED_ORIGINS
 
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
-	'https://stg.bugowl.helpchat.social',
-	'https://bugowl.helpchat.social',
-	'http://localhost:8010',
-	'http://127.0.0.1:8010',
-	'https://bugowl.ai',
-	'https://stg.bugowl.ai',
-	'http://localhost:3000',
-	'https://v0-bug-owl.vercel.app',
-]
+CORS_ALLOWED_ORIGINS = ALLOWED_ORIGINS
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -139,7 +134,7 @@ MIDDLEWARE = [
 	'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'bugowl_websocket.urls'
+ROOT_URLCONF = 'api.urls'
 
 TEMPLATES = [
 	{
@@ -157,9 +152,9 @@ TEMPLATES = [
 ]
 
 
-ASGI_APPLICATION = 'bugowl_websocket.asgi.application'
+ASGI_APPLICATION = 'api.asgi.application'
 
-WSGI_APPLICATION = 'bugowl_websocket.wsgi.application'
+WSGI_APPLICATION = 'api.wsgi.application'
 
 
 # Database
@@ -302,7 +297,7 @@ LOGGING = {
 		},
 		'slack': {
 			'level': 'ERROR',
-			'class': 'bugowl_websocket.logging.SlackHandler',
+			'class': 'api.logging.SlackHandler',
 			'formatter': 'slack',
 			'webhook_url': os.getenv('SLACK_WEBHOOK_URL'),
 			'channel': os.getenv('SLACK_CHANNEL'),

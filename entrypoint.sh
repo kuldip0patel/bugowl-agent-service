@@ -4,7 +4,7 @@ echo "STARTING..."
 echo "SET -E option"
 set -e
 pwd
-MANAGE_PY="/app/bugowl/bugowl_websocket/manage.py"
+MANAGE_PY="/app/bugowl/manage.py"
 # Ensure log directory exists and has proper permissions
 # mkdir -p /logs
 # touch /logs/django.log
@@ -41,4 +41,4 @@ echo "RUNNING manage.py create_admin_user"
 python $MANAGE_PY create_admin_user
 
 echo "STARTING SERVER WITH DAPHNE"
-daphne -b 0.0.0.0 -p 8020 bugowl_websocket.asgi:application
+daphne -b 0.0.0.0 -p 8020 api.asgi:application

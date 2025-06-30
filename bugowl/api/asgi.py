@@ -13,9 +13,9 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
 from websocket.routing import websocket_urlpatterns
 
-from bugowl_websocket.middleware import JWTAuthMiddleware
+from api.middleware import JWTAuthMiddleware
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bugowl_websocket.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'api.settings')
 
 application = ProtocolTypeRouter(
 	{
