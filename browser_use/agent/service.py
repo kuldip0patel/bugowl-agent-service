@@ -1237,7 +1237,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.logger.debug('✅ Initial actions completed')
 
 			#self._is_initialized = True
-			logger.info(f"AGENT IS INITIALISED!!!")
+			#logger.info(f"AGENT IS INITIALISED!!!")
 
 		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
 		try:
@@ -1494,6 +1494,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				action_params = getattr(action, action_name, '')
 				self.logger.info(f'☑️ Executed action {i + 1}/{len(actions)}: {action_name}({action_params})')
 				if results[-1].is_done or results[-1].error or i == len(actions) - 1:
+					logger.info(f"Breaking Actions Loop because the last result is... done?: { results[-1].is_done} | error?:{results[-1].error} ")
 					break
 
 				await asyncio.sleep(self.browser_profile.wait_between_actions)

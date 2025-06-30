@@ -58,6 +58,7 @@ async def run_tasks(tasks: list[str]):
     llm_openai = ChatOpenAI(model="gpt-4o")
     #llm_openai = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
     llm_google = ChatGoogle(model="gemini-2.5-flash")
+    llm = llm_openai
     llm = llm_google
 
 
