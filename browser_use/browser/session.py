@@ -1527,6 +1527,9 @@ class BrowserSession(BaseModel):
 			if element_handle is None:
 				raise Exception(f'Element: {repr(element_node)} not found')
 
+			# Check if element is likely to cause navigation
+			is_navigation_element = self._is_navigation_element(element_node)
+			
 			async def perform_click(click_func):
 				"""Performs the actual click, handling both download and navigation scenarios."""
 
@@ -1572,13 +1575,32 @@ class BrowserSession(BaseModel):
 						)
 					await self._check_and_handle_navigation(page)
 
+			# Handle navigation elements with expect_navigation
+			if is_navigation_element:
+				try:
+					# Use expect_navigation to handle navigation events properly
+					async with page.expect_navigation(timeout=10000, wait_until='domcontentloaded') as navigation_info:
+						await element_handle.click(timeout=1500)
+						# Small delay to ensure click completes before navigation
+						await asyncio.sleep(0.1)
+					
+					# Wait for the navigation to complete
+					await navigation_info.value
+					
+					# Check if navigation was successful
+					await self._check_and_handle_navigation(page)
+					return None  # Success
+				except Exception as nav_e:
+					self.logger.debug(f'Navigation click failed, falling back to regular click: {type(nav_e).__name__}: {nav_e}')
+					# Fall back to regular click handling
+
 			try:
 				return await perform_click(lambda: element_handle and element_handle.click(timeout=1500))
 			except URLNotAllowedError as e:
 				raise e
 			except Exception as e:
 				# Check if it's a context error and provide more info
-				if 'Cannot find context with specified id' in str(e) or 'Protocol error' in str(e):
+				if 'Cannot find context with specified id' in str(e) or 'Protocol error' in str(e) or 'Execution context was destroyed' in str(e):
 					self.logger.warning(f'⚠️ Element context lost, attempting to re-locate element: {type(e).__name__}')
 					# Try to re-locate the element
 					element_handle = await self.get_locate_element(element_node)
@@ -1620,6 +1642,43 @@ class BrowserSession(BaseModel):
 			raise e
 		except Exception as e:
 			raise Exception(f'Failed to click element: {repr(element_node)}. Error: {str(e)}')
+
+	def _is_navigation_element(self, element_node: DOMElementNode) -> bool:
+		"""
+		Check if an element is likely to cause navigation when clicked.
+		"""
+		attributes = element_node.attributes or {}
+		
+		# Check for href attribute (links)
+		if 'href' in attributes and attributes['href']:
+			href = attributes['href']
+			# Skip javascript: and # links
+			if not href.startswith('javascript:') and not href.startswith('#'):
+				return True
+		
+		# Check for form submission elements
+		if element_node.tag_name.lower() in ['button', 'input']:
+			button_type = attributes.get('type', '').lower()
+			if button_type in ['submit']:
+				return True
+		
+		# Check for onclick handlers that might cause navigation
+		if 'onclick' in attributes:
+			onclick = attributes['onclick'].lower()
+			if any(nav_keyword in onclick for nav_keyword in ['location', 'window.open', 'navigate', 'redirect']):
+				return True
+		
+		# Check for data attributes that might indicate navigation
+		if any(attr.startswith('data-') and 'nav' in attr.lower() for attr in attributes.keys()):
+			return True
+		
+		# Check for common navigation-related classes
+		classes = attributes.get('class', '').lower()
+		nav_classes = ['nav', 'navigation', 'menu', 'link', 'button', 'tab']
+		if any(nav_class in classes for nav_class in nav_classes):
+			return True
+		
+		return False
 
 	@require_initialization
 	@time_execution_async('--get_tabs_info')
@@ -3225,36 +3284,32 @@ class BrowserSession(BaseModel):
 
 	@require_initialization
 	async def _scroll_container(self, pixels: int) -> None:
-		"""Scroll the element that truly owns vertical scroll.Starts at the focused node ➜ climbs to the first big, scroll-enabled ancestor otherwise picks the first scrollable element or the root, then calls `element.scrollBy` (or `window.scrollBy` for the root) by the supplied pixel value."""
+		SMART_SCROLL_CENTER_JS = """
+		(dy) => {
+			const x = window.innerWidth / 2;
+			const y = window.innerHeight / 2;
+			let el = document.elementFromPoint(x, y);
 
-		# An element can *really* scroll if: overflow-y is auto|scroll|overlay, it has more content than fits, its own viewport is not a postage stamp (more than 50 % of window).
-		SMART_SCROLL_JS = """(dy) => {
-			const bigEnough = el => el.clientHeight >= window.innerHeight * 0.5;
-			const canScroll = el =>
-				el &&
-				/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
-				el.scrollHeight > el.clientHeight &&
-				bigEnough(el);
+			function isScrollable(e) {
+				if (!e) return false;
+				const style = getComputedStyle(e);
+				return /(auto|scroll|overlay)/.test(style.overflowY) && e.scrollHeight > e.clientHeight;
+			}
 
-			let el = document.activeElement;
-			while (el && !canScroll(el) && el !== document.body) el = el.parentElement;
+			let scrollEl = el;
+			while (scrollEl && !isScrollable(scrollEl) && scrollEl !== document.body) {
+				scrollEl = scrollEl.parentElement;
+			}
 
-			el = canScroll(el)
-					? el
-					: [...document.querySelectorAll('*')].find(canScroll)
-					|| document.scrollingElement
-					|| document.documentElement;
-
-			if (el === document.scrollingElement ||
-				el === document.documentElement ||
-				el === document.body) {
+			if (!scrollEl || scrollEl === document.body || scrollEl === document.documentElement) {
 				window.scrollBy(0, dy);
 			} else {
-				el.scrollBy({ top: dy, behavior: 'auto' });
+				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
 			}
-		}"""
+		}
+		"""
 		page = await self.get_current_page()
-		await page.evaluate(SMART_SCROLL_JS, pixels)
+		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
 
 	# --- DVD Screensaver Loading Animation Helper ---
 	async def _show_dvd_screensaver_loading_animation(self, page: Page) -> None:
@@ -3294,7 +3349,7 @@ class BrowserSession(BaseModel):
 			// Create the image element
 			const img = document.createElement('img');
 			//img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=96&q=75';
-			img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
+			img.src = 'https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
 			img.alt = 'Browser-Use';
 			img.style.width = '200px';
 			img.style.height = 'auto';
@@ -3316,32 +3371,28 @@ class BrowserSession(BaseModel):
 			if (Math.random() > 0.5) dx = -dx;
 			if (Math.random() > 0.5) dy = -dy;
 
+			x = window.innerWidth / 2;
+			y = 100;
+			dy = 0;  // vertical velocity
+			const gravity = 0.2;
+			const damping = 0.8;
+
+			// Add this at the top with other variables
+			let angle = 0;
+			const radius = 100;
+			const centerX = window.innerWidth / 2;
+			const centerY = window.innerHeight / 2;
+
 			function animate() {
-				const imgWidth = img.offsetWidth || 300;
-				const imgHeight = img.offsetHeight || 300;
-				x += dx;
-				y += dy;
-
-				if (x <= 0) {
-					x = 0;
-					dx = Math.abs(dx);
-				} else if (x + imgWidth >= window.innerWidth) {
-					x = window.innerWidth - imgWidth;
-					dx = -Math.abs(dx);
-				}
-				if (y <= 0) {
-					y = 0;
-					dy = Math.abs(dy);
-				} else if (y + imgHeight >= window.innerHeight) {
-					y = window.innerHeight - imgHeight;
-					dy = -Math.abs(dy);
-				}
-
+				angle += 0.01;
+				x = centerX + Math.cos(angle) * radius - img.offsetWidth/2;
+				y = centerY + Math.sin(angle) * radius - img.offsetHeight/2;
+				
 				img.style.left = `${x}px`;
 				img.style.top = `${y}px`;
-
 				requestAnimationFrame(animate);
 			}
+
 			animate();
 
 			// Responsive: update bounds on resize

@@ -269,13 +269,12 @@ class Controller(Generic[Context]):
 				error_msg = str(e)
 				if 'Execution context was destroyed' in error_msg or 'Cannot find context with specified id' in error_msg:
 					# Page navigated during click - refresh state and return it
-					logger.info('Page context changed during click, refreshing state...')
+					logger.info('Page navigated during click, refreshing state...')  # Changed from error to info
 					await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
-					return ActionResult(
-						error='Page navigated during click. Refreshed state provided.', include_in_memory=True, success=False
-					)
+					msg = f'Clicked button with index {params.index}: {element_node} | Page navigated successfully.'
+					return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 				else:
-					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed')
+					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed', exc_info=True)
 					return ActionResult(error=error_msg, success=False)
 
 		@self.registry.action(
