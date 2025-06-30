@@ -3377,23 +3377,18 @@ class BrowserSession(BaseModel):
 			const gravity = 0.2;
 			const damping = 0.8;
 
+			// Add this at the top with other variables
+			let angle = 0;
+			const radius = 100;
+			const centerX = window.innerWidth / 2;
+			const centerY = window.innerHeight / 2;
+
 			function animate() {
-				dy += gravity;
-				y += dy;
+				angle += 0.01;
+				x = centerX + Math.cos(angle) * radius - img.offsetWidth/2;
+				y = centerY + Math.sin(angle) * radius - img.offsetHeight/2;
 				
-				// Floor collision
-				if (y + img.offsetHeight > window.innerHeight) {
-					y = window.innerHeight - img.offsetHeight;
-					dy = -dy * damping;
-				}
-				
-				// Ceiling collision (optional)
-				if (y < 0) {
-					y = 0;
-					dy = -dy * damping;
-				}
-				
-				img.style.left = `${x - img.offsetWidth/2}px`;
+				img.style.left = `${x}px`;
 				img.style.top = `${y}px`;
 				requestAnimationFrame(animate);
 			}

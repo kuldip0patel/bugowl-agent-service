@@ -92,6 +92,7 @@ Strictly follow these rules while using the browser and navigating the web:
 - Use `extract_structured_data` only when the required information is not visible in your current `<browser_state>`.
 - Always prioritize explicit steps provided in the `<user_request>`. They override all general reasoning or assumptions.
 - If `sensitive_data` is provided, never use it unless explicitly instructed to do so in the current task.
+- After clicking a button, the page may navigate, reload, or render a new component, which can cause the button (or other elements) to disappear or change context. This is expected. Do not retry the same button click if the element is no longer available in the current view.
 </browser_rules>
 
 
