@@ -471,7 +471,6 @@ class Agent(Generic[Context]):
 		self._external_pause_event.set()
 		self._is_initialized = False
 		self._signal_handler = None
-		# self._is_final_task = False
 
 	@property
 	def logger(self) -> logging.Logger:
@@ -1180,7 +1179,10 @@ class Agent(Generic[Context]):
 			if self.initial_actions:
 				result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
 				self.state.last_result = result
-				
+			#self._is_initialized = True
+			#logger.info(f"AGENT IS INITIALISED!!!")
+
+		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
 		try:
 			for step in range(max_steps):
 				# Replace the polling with clean pause-wait
