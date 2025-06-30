@@ -1185,30 +1185,31 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 	) -> AgentHistoryList[AgentStructuredOutput]:
 		"""Execute the task with maximum number of steps"""
 		if not self._is_initialized:
-
-			loop = asyncio.get_event_loop()
+			# loop = asyncio.get_event_loop()
+			logger.info(f"INITALISING AGENT!!!")
+			# loop = asyncio.get_event_loop()
 			agent_run_error: str | None = None  # Initialize error tracking variable
 			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
 
 			# Set up the  signal handler with callbacks specific to this agent
-			from browser_use.utils import SignalHandler
+			# from browser_use.utils import SignalHandler
 
-			# Define the custom exit callback function for second CTRL+C
-			def on_force_exit_log_telemetry():
-				self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
-				# NEW: Call the flush method on the telemetry instance
-				if hasattr(self, 'telemetry') and self.telemetry:
-					self.telemetry.flush()
-				self._force_exit_telemetry_logged = True  # Set the flag
+			# # Define the custom exit callback function for second CTRL+C
+			# def on_force_exit_log_telemetry():
+			# 	self._log_agent_event(max_steps=max_steps, agent_run_error='SIGINT: Cancelled by user')
+			# 	# NEW: Call the flush method on the telemetry instance
+			# 	if hasattr(self, 'telemetry') and self.telemetry:
+			# 		self.telemetry.flush()
+			# 	self._force_exit_telemetry_logged = True  # Set the flag
 
-			signal_handler = SignalHandler(
-				loop=loop,
-				pause_callback=self.pause,
-				resume_callback=self.resume,
-				custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
-				exit_on_second_int=True,
-			)
-			signal_handler.register()
+			# signal_handler = SignalHandler(
+			# 	loop=loop,
+			# 	pause_callback=self.pause,
+			# 	resume_callback=self.resume,
+			# 	custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
+			# 	exit_on_second_int=True,
+			# )
+			# signal_handler.register()
 
 			self._log_agent_run()
 
@@ -1236,17 +1237,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.logger.debug('✅ Initial actions completed')
 
 			#self._is_initialized = True
-			#logger.info(f"AGENT IS INITIALISED!!!")
+			logger.info(f"AGENT IS INITIALISED!!!")
 
 		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
 		try:
 			self.logger.debug(f'🔄 Starting main execution loop with max {max_steps} steps...')
 			for step in range(max_steps):
 				# Replace the polling with clean pause-wait
-				if self.state.paused:
-					self.logger.debug(f'⏸️ Step {step}: Agent paused, waiting to resume...')
-					await self.wait_until_resumed()
-					signal_handler.reset()
+				# if self.state.paused:
+				# 	self.logger.debug(f'⏸️ Step {step}: Agent paused, waiting to resume...')
+				# 	await self.wait_until_resumed()
+				# 	signal_handler.reset()
 
 				# Check if we should stop due to too many failures
 				if self.state.consecutive_failures >= self.settings.max_failures:
@@ -1363,7 +1364,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			await self.token_cost_service.log_usage_summary()
 
 			# Unregister signal handlers before cleanup
-			signal_handler.unregister()
+			#signal_handler.unregister()
 
 			if not self._force_exit_telemetry_logged:  # MODIFIED: Check the flag
 				try:
