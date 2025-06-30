@@ -448,7 +448,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		self._external_pause_event.set()
 		self._is_initialized = False
 		self._signal_handler = None
-		# self._is_final_task = False
 
 	@property
 	def logger(self) -> logging.Logger:
@@ -1236,6 +1235,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				self.state.last_result = result
 				self.logger.debug('✅ Initial actions completed')
 
+			#self._is_initialized = True
+			#logger.info(f"AGENT IS INITIALISED!!!")
+
+		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
 		try:
 			self.logger.debug(f'🔄 Starting main execution loop with max {max_steps} steps...')
 			for step in range(max_steps):

@@ -29,8 +29,6 @@ def read_tasks(my_file_path):
         List of tasks
     """
     tasks = []
-    #my_file_path = "mmt.txt"
-    #my_file_path = "baya.txt"
     file_path = Path(my_file_path)
     
     if not file_path.exists():
@@ -80,22 +78,6 @@ async def run_tasks(tasks: list[str]):
         # viewport_expansion=-1,
     )
 
-    # browser_session = BrowserSession(browser_profile=browser_profile)
-    # await browser_session.start()  # This launches the browser and context
-        
-    # # Get the context (after start, it's available)
-    # browser_context = browser_session.browser_context
-
-    # # Open a new page (tab)
-    # if browser_context:
-    #     page = await browser_context.new_page()
-    # else:
-    #     page = None
-        
-    # # Setup network monitoring
-    # # cleanup_task = await setup_network_monitoring(page)
-    # browser = browser_session.browser
-
     my_browser_session = BrowserSession(browser_profile=browser_profile)
 
     await my_browser_session.start()
@@ -107,77 +89,48 @@ async def run_tasks(tasks: list[str]):
         "hubspot_email": os.getenv("HUBSPOT_EMAIL"),
         "hubspot_password": os.getenv("HUBSPOT_PASSWORD"),
     }
-    run_tasks_one_by_one = True
-    # tasks_list = []
-    # if not run_tasks_one_by_one:
-        # for i in range(1, len(tasks) + 1):
-        #     tasks[i-1] = f"STEP {i}: {tasks[i-1]}"
-        # tasks_list = " \n\n ".join(tasks)
-        # print(f"\n OUR task list: {tasks_list}")
 
-    if run_tasks_one_by_one:
-        print("BUGOWL: Running tasks ONE BY ONE")
-        agent = None
-        results = []
-        count = 0
-        for task in tasks:
-            count = count + 1
-            task_id = str(uuid.uuid4())
-            if not agent:
-                agent = Agent(
-                            task=task,
-                            task_id=task_id,
-                            llm=llm,
-                            browser_session=my_browser_session,
-                            # page=page,
-                            # browser=browser,
-                            # browser_context=browser_context,
-                            # browser_profile=browser_profile,
-                            # browser_session=browser_session,
-                            enable_memory=False,
-                            save_conversation_path="logs/conversation",  # Save chat logs
-                            use_vision=True,
-                            sensitive_data=sensitive_data,
-                            cloud_sync=None,
-                            use_thinking=False,
-                )
-            else:
-                is_final_task = True if count == len(task) else False
-                agent.add_new_task(task)
-            print(f"\033[94mBUGOWL: Executing Task #{count} ▶ : {task}\033[0m")
-            history = await agent.run()
-            output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
-            print(f"\033[94mBUGOWL: {task} : {output}\033[0m")
-            res = (task, output)
-            results.append(res)
-            if not history.is_successful():
-                # Take a screenshot of the failed state
-                from browser_use.utils import save_failure_screenshot
-                await save_failure_screenshot(my_browser_session, task_id)						
-                break
-        for res in results:
-            print(f"\033[94m{res}\033[0m")
-    else:
-        print("BUGOWL: Running all tasks together")
-        agent = Agent(
-            task=str(tasks),
-            llm=llm,
-            # page=page,
-            # browser=browser,
-            enable_memory=True,
-            save_conversation_path="logs/conversation",  # Save chat logs
-            use_vision=True,
-            sensitive_data=sensitive_data
-        )
+    print("BUGOWL: Running tasks ONE BY ONE")
+    agent = None
+    results = []
+    count = 0
+    for task in tasks:
+        count = count + 1
+        test_run_uuid = str(uuid.uuid4())
+        if not agent:
+            agent = Agent(
+                        task=task,
+                        task_id=test_run_uuid,
+                        llm=llm,
+                        browser_session=my_browser_session,
+                        # page=page,
+                        # browser=browser,
+                        # browser_context=browser_context,
+                        # browser_profile=browser_profile,
+                        # browser_session=browser_session,
+                        enable_memory=False,
+                        save_conversation_path="logs/conversation",  # Save chat logs
+                        use_vision=True,
+                        sensitive_data=sensitive_data,
+                        cloud_sync=None,
+                        use_thinking=False,
+            )
+        else:
+            agent.add_new_task(task)
+        print(f"\033[94mBUGOWL: Executing Task #{count} ▶ : {task}\033[0m")
         history = await agent.run()
         output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
-        print(f"Running all tasks status : {output}")
-        for t, s in agent.tasks_result:
-            output = '✅ SUCCESSFUL' if s else '❌ FAILED!'
-            print(f" TASK: {t} : {output} ")
-
-
-    #await browser_session.close()
+        print(f"\033[94mBUGOWL: {task} : {output}\033[0m")
+        res = (task, output)
+        results.append(res)
+        if not history.is_successful():
+            # Take a screenshot of the failed state
+            from browser_use.utils import save_failure_screenshot
+            await save_failure_screenshot(my_browser_session, task_id)						
+            break
+    for res in results:
+        print(f"\033[94m{res}\033[0m")
+    await my_browser_session.close()
     if agent:
         await agent.close()
 
