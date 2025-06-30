@@ -1,10 +1,10 @@
 import json
 import logging
-import os
 
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.conf import settings
 
-logger = logging.getLogger(os.getenv('ENVIRONMENT'))
+logger = logging.getLogger(settings.ENV)
 
 
 class AgentWebSocketConsumer(AsyncWebsocketConsumer):
