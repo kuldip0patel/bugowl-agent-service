@@ -42,7 +42,7 @@ if 'LOCAL' in ENVIRONMENT:
 	DEBUG = True
 
 DJANGO_SUPER_USER = 'admin'
-DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD')
+DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD','admin')
 DJANGO_SUPER_USER_EMAIL = 'bugowl.qa@gmail.com'
 
 
@@ -121,6 +121,9 @@ INSTALLED_APPS = [
 	'corsheaders',
 	'channels',
 	'websocket',
+	"api",
+	"bugowl",
+
 ]
 
 MIDDLEWARE = [
@@ -297,7 +300,7 @@ LOGGING = {
 		},
 		'slack': {
 			'level': 'ERROR',
-			'class': 'api.logging.SlackHandler',
+			'class': 'api.slack_logging.SlackHandler',
 			'formatter': 'slack',
 			'webhook_url': os.getenv('SLACK_WEBHOOK_URL'),
 			'channel': os.getenv('SLACK_CHANNEL'),
@@ -326,7 +329,7 @@ LOGGING = {
 
 
 BROKER_TRANSPORT = 'redis'
-BROKER_URL = os.getenv('BROKER_URL')
+BROKER_URL = os.getenv('BROKER_URL', 'redis://redis:6381/0')
 
 BROKER_TRANSPORT = 'redis'
 ELASTICACHE_HOST = os.getenv('ELASTICACHE_HOST') if 'ELASTICACHE_HOST' in os.environ else 'redis'
@@ -336,4 +339,4 @@ BROKER_URL = os.getenv('BROKER_URL') if 'BROKER_URL' in os.environ else 'redis:/
 CELERY_BROKER_URL = BROKER_URL
 CELERY_RESULT_BACKEND = BROKER_URL
 DJANGO_CACHE_LOCATION = os.getenv('DJANGO_CACHE_LOCATION') if 'DJANGO_CACHE_LOCATION' in os.environ else 'redis://redis:6381/1'
-REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else ''
+REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else 'jhadfhjkahdfjkhf'
