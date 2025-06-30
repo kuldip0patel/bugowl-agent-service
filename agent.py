@@ -126,7 +126,7 @@ async def run_tasks(tasks: list[str]):
         if not history.is_successful():
             # Take a screenshot of the failed state
             from browser_use.utils import save_failure_screenshot
-            await save_failure_screenshot(my_browser_session, task_id)						
+            await save_failure_screenshot(my_browser_session, test_run_uuid)						
             break
     for res in results:
         print(f"\033[94m{res}\033[0m")
