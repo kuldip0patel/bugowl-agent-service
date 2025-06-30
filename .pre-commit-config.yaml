@@ -8,6 +8,7 @@ repos:
     rev: v2.4.1
     hooks:
       - id: codespell # See pyproject.toml for args
+        args: ["--ignore-words=.codespell-ignore-words"]
         additional_dependencies:
           - tomli
 

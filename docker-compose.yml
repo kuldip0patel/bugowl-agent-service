@@ -1,0 +1,52 @@
+version: '3.8'
+
+volumes:
+  static_volume:
+  logs_volume:
+
+services:
+  redis:
+    image: redis
+    command: redis-server --port 6381
+    ports:
+      - 6381:6381
+    networks:
+      - app-network
+
+  api:
+    build: .
+    entrypoint: sh
+    command:  entrypoint.sh
+    env_file:
+      - .env
+    volumes:
+      - static_volume:/app/staticfiles
+      - logs_volume:/logs
+      - .:/app:delegated
+    ports:
+      - 8020:8020
+    links:
+      - redis
+    depends_on:
+      - redis
+    networks:
+      - app-network
+
+  celery: 
+    build: .
+    command: celery -A api.celery worker -l info
+    env_file:
+      - .env
+    volumes:
+      - .:/app:delegated
+      - logs_volume:/logs
+    links:
+      - redis
+    depends_on:
+      - redis
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
