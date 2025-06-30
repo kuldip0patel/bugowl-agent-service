@@ -1,4 +1,4 @@
-version: '3.8'
+#version: '3.8'
 
 volumes:
   static_volume:
@@ -39,7 +39,7 @@ services:
 
   celery: 
     build: .
-    command: celery -A bugowl.api.celery worker -l info
+    command: bash -c "cd /app/bugowl && /app/.venv/bin/celery -A api.celery_app worker -l info"
     env_file:
       - .env
     volumes:
