@@ -244,26 +244,87 @@ class Controller(Generic[Context]):
 				logger.info(msg)
 				return ActionResult(extracted_content=msg, include_in_memory=True, success=False, long_term_memory=msg)
 
+			# Capture state before click for detailed comparison
+			pre_click_state = await browser_session.get_state_summary(cache_clickable_elements_hashes=False)
+			pre_click_url = pre_click_state.url
+			pre_click_title = pre_click_state.title
+			pre_click_element_count = len(pre_click_state.selector_map) if pre_click_state.selector_map else 0
+
+			# Get element text for better reporting
+			element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else "Unknown"
+			element_tag = element_node.tag_name if element_node else "unknown"
+
 			msg = None
 
 			try:
 				assert element_node is not None, f'Element with index {params.index} does not exist'
 				download_path = await browser_session._click_element_node(element_node)
+
+				# Capture state after click for comparison
+				post_click_state = await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
+				post_click_url = post_click_state.url
+				post_click_title = post_click_state.title
+				post_click_element_count = len(post_click_state.selector_map) if post_click_state.selector_map else 0
+
+				# Check if the clicked element still exists with same index
+				element_still_exists = params.index in post_click_state.selector_map if post_click_state.selector_map else False
+				element_changed = False
+				if element_still_exists:
+					post_click_element = await browser_session.get_dom_element_by_index(params.index)
+					if post_click_element:
+						post_element_text = post_click_element.get_all_text_till_next_clickable_element(max_depth=2)
+						element_changed = element_text != post_element_text
+
+				# Build detailed result message
 				if download_path:
 					emoji = '💾'
 					msg = f'Downloaded file to {download_path}'
 				else:
 					emoji = '🖱️'
-					msg = f'Clicked button with index {params.index}: {element_node.get_all_text_till_next_clickable_element(max_depth=2)}'
+					changes = []
+
+					# Check for URL change
+					if pre_click_url != post_click_url:
+						changes.append(f"URL changed from '{pre_click_url}' to '{post_click_url}'")
+						emoji = '🔗'
+
+					# Check for title change
+					if pre_click_title != post_click_title:
+						changes.append(f"page title changed from '{pre_click_title}' to '{post_click_title}'")
+
+					# Check for element count change
+					if pre_click_element_count != post_click_element_count:
+						changes.append(f"page elements changed from {pre_click_element_count} to {post_click_element_count}")
+
+					# Check if clicked element disappeared
+					if not element_still_exists:
+						changes.append(f"Clicked {element_tag} '{element_text}' disappeared from page")
+					elif element_changed:
+						changes.append(f"Clicked {element_tag} and content changed")
+
+					# Check for new tab
+					if len(browser_session.tabs) > initial_pages:
+						changes.append("new tab opened")
+						emoji = '🔗'
+
+					# Build the message
+					base_msg = f"Successfully clicked {element_tag} with index {params.index}: '{element_text}'"
+					if changes:
+						change_summary = " | ".join(changes)
+						msg = f"{base_msg} | {change_summary}"
+					else:
+						msg = f"{base_msg} | No visible page changes detected"
 
 				logger.info(f'{emoji} {msg}')
 				logger.debug(f'Element xpath: {element_node.xpath}')
+
 				if len(browser_session.tabs) > initial_pages:
-					new_tab_msg = 'New tab opened - switching to it'
-					msg += f' - {new_tab_msg}'
-					emoji = '🔗'
-					logger.info(f'{emoji} {new_tab_msg}')
+					new_tab_msg = 'switching to new tab'
+					if 'new tab opened' not in msg:
+						msg += f' - {new_tab_msg}'
+					logger.info(f'🔗 {new_tab_msg}')
 					await browser_session.switch_to_tab(-1)
+
 				return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 			except Exception as e:
 				error_msg = str(e)
@@ -271,7 +332,7 @@ class Controller(Generic[Context]):
 					# Page navigated during click - refresh state and return it
 					logger.info('Page navigated during click, refreshing state...')  # Changed from error to info
 					await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
-					msg = f'Clicked button with index {params.index}: {element_node} | Page navigated successfully.'
+					msg = f'Clicked {element_tag} with index {params.index}: \'{element_text}\' | Page navigated successfully (context destroyed during navigation).'
 					return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 				else:
 					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed', exc_info=True)
