@@ -1,33 +1,35 @@
 import json
 import logging
+import os
 
 from channels.generic.websocket import AsyncWebsocketConsumer
-from django.conf import settings
-from rest_framework.authtoken.models import Token
 
-logger = logging.getLogger(settings.ENV)
+logger = logging.getLogger(os.getenv('ENVIRONMENT'))
 
 
 class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 	async def connect(self):
-		headers = self.scope['headers']
-		auth_header = dict(headers).get(b'authorization', None)
+		user = self.scope.get('user')
+		error = self.scope.get('auth_error')
 
-		if auth_header:
-			try:
-				token_key = auth_header.decode().split(' ')[1]
-				token = Token.objects.get(key=token_key)
-				self.scope['user'] = token.user
-				logger.info(f'WebSocket connection established for user: {self.scope["user"].username}')
-				await self.accept()
-			except Token.DoesNotExist:
-				await self.close(code=403)
+		if error:
+			logger.warning(f'WebSocket connection failed: {error}', exc_info=True)
+			await self.close(code=403, reason=error)
+		elif user:
+			self.scope['user_id'] = user.get('user_id')
+			self.scope['user_email'] = user.get('user_email')
+			self.scope['user_first_name'] = user.get('first_name')
+			self.scope['user_last_name'] = user.get('last_name')
+			logger.info(f'WebSocket connection established for user: {self.scope["user_email"]}')
+			await self.accept()
+			await self.send(text_data=json.dumps({'message': 'Connection established', 'user_email': self.scope['user_email']}))
 		else:
-			await self.close(code=401)
+			logger.error('WebSocket connection failed: Authorization header missing', exc_info=True)
+			await self.close(code=401, reason='Authorization header missing')
 
 	async def disconnect(self, close_code):
-		logger.info(f'WebSocket connection closed with code: {close_code}')
-		print('WebSocket connection closed')
+		reason = self.scope.get('auth_error', 'Connection closed')
+		logger.info(f'WebSocket connection closed with code: {close_code}, reason: {reason}')
 
 	async def receive(self, text_data):
 		data = json.loads(text_data)

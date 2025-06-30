@@ -15,7 +15,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+print('settings started')
 load_dotenv()
+print(os.getenv('DJANGO_SETTINGS_MODULE'))
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,12 +27,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'your-secret-key')
+AGENT_SERVER_SECRET_KEY = os.getenv('AGENT_SERVER_SECRET_KEY', 'your-agent-server-secret-key')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'LOCAL')
+print(f'Environment: {ENVIRONMENT}')
 ENV = ENVIRONMENT
 
 LOGGER = ENVIRONMENT
@@ -298,7 +302,7 @@ LOGGING = {
 		},
 		'slack': {
 			'level': 'ERROR',
-			'class': 'api.logging.SlackHandler',
+			'class': 'bugowl_websocket.logging.SlackHandler',
 			'formatter': 'slack',
 			'webhook_url': os.getenv('SLACK_WEBHOOK_URL'),
 			'channel': os.getenv('SLACK_CHANNEL'),
