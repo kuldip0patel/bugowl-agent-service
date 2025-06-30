@@ -6,7 +6,7 @@ volumes:
 
 services:
   redis:
-    image: redis 
+    image: redis
     command: redis-server --port 6381
     ports:
       - 6381:6381
@@ -15,34 +15,43 @@ services:
 
   api:
     build: .
-    command: sh entrypoint.sh
+    entrypoint: ["/bin/bash"]
+    command: ["/app/entrypoint.sh"]
     env_file:
       - .env
     volumes:
       - static_volume:/app/staticfiles
       - logs_volume:/logs
-      - /var/log:/logs
-      - .:/app:delegated
+      # Mount only essential directories for development
+      - ./browser_use:/app/browser_use:delegated
+      - ./bugowl:/app/bugowl:delegated
+      - ./entrypoint.sh:/app/entrypoint.sh:delegated
+      - ./.env:/app/.env:delegated
     ports:
       - 8020:8020
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: "on-failure"
+    links:
+      - redis
+    depends_on:
+      - redis
     networks:
       - app-network
+    user: root  # Run as root to avoid permission issues
 
-  celery:
-    restart: always
+  celery: 
     build: .
-    command: sh -c "celery -A api purge -f  && celery -A api worker -l info"
+    command: celery -A bugowl.api.celery worker -l info
     env_file:
       - .env
     volumes:
-      - .:/app:delegated
       - logs_volume:/logs
-      - /var/log:/logs
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      # Mount only essential directories for development
+      - ./browser_use:/app/browser_use:delegated
+      - ./bugowl:/app/bugowl:delegated
+      - ./.env:/app/.env:delegated
+    links:
+      - redis
+    depends_on:
+      - redis
     networks:
       - app-network
 

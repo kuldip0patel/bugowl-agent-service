@@ -87,7 +87,7 @@ ENV AWS_SECRET_NAME=$AWS_SECRET_NAME
 ENV AWS_REGION_NAME=$AWS_REGION_NAME
 ENV AWS_IAM_ROLE=$AWS_IAM_ROLE
 ENV DJANGO_SETTINGS_MODULE=api.settings
-ENV PYTHONPATH=/app:/app/bugowl/bugowl_websocket
+ENV PYTHONPATH=/app:/app/bugowl/api
 
 # Build shell config
 SHELL ["/bin/bash", "-o", "pipefail", "-o", "errexit", "-o", "errtrace", "-o", "nounset", "-c"] 
@@ -230,19 +230,23 @@ RUN mkdir -p "$DATA_DIR/profiles/default" \
 
 
 
-# Create necessary directories
+# Create necessary directories with proper permissions
 RUN mkdir -p /app/logs && \
     mkdir -p /app/staticfiles && \
     mkdir -p /app/media && \
     mkdir -p /logs && \
-    touch /logs/django.log && \
     chmod -R 777 /app/logs && \
+    chmod -R 777 /app/staticfiles && \
+    chmod -R 777 /app/media && \
     chmod -R 777 /logs
 
 
 COPY entrypoint.sh /app/
+COPY entrypoint.sh /app/
 # Convert line endings and set permissions
 RUN sed -i 's/\r$//' /app/entrypoint.sh && \
+    sed -i 's/\r$//' /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 
 
@@ -252,13 +256,17 @@ RUN ["apt-get", "update"]
 RUN ["apt-get", "install", "-y", "vim"]
 
 
-USER "$BROWSERUSE_USER"
+# Switch back to root for entrypoint script execution
+USER root
+
 VOLUME "$DATA_DIR"
 EXPOSE 8010
 EXPOSE 8020
 EXPOSE 9242
 EXPOSE 9222
 
+# Set working directory
+WORKDIR /app
 
-
-ENTRYPOINT ["browser-use"]
+# Default command (can be overridden by docker-compose)
+CMD ["/bin/bash"]
