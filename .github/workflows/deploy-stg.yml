@@ -23,12 +23,12 @@ jobs:
             echo "📥 Pulling latest code..."
             cd /home/ubuntu/code/bugowl-agent-service
 
-            # Reset any local changes and force checkout dev branch
+            # Reset any local changes and force checkout bugowl-dev branch
             git reset --hard HEAD
             git clean -fd
             git fetch origin
-            git checkout -f dev
-            git pull origin dev || {
+            git checkout -f bugowl-dev
+            git pull origin bugowl-dev || {
               echo "❌ Failed to pull code"
               exit 1
             }
