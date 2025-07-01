@@ -107,8 +107,10 @@ async def handle_response(response):
             request_data["response"] = response_data
             
             # Save to file
-            with open("network_logs/requests.json", "a") as f:
-                f.write(json.dumps(request_data) + "\n")
+            import anyio
+            async with await anyio.open_file("network_logs/requests.json", "a") as f:
+                # with open("network_logs/requests.json", "a") as f:
+                await f.write(json.dumps(request_data) + "\n")
             
             # Clean up the request from the map
             del request_map[request_id]

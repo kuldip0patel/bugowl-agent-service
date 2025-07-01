@@ -9,6 +9,9 @@
 name: publish
 
 on:
+  push:
+    branches:
+      - main
   release:
     types: [published]     # publish full release to PyPI when a release is created on Github
   # schedule:

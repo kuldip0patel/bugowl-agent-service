@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import argparse
 from browser_use import BrowserConfig, Browser, BrowserContextConfig
-from browser_use.browser.profile import BrowserProfile, get_display_size
+from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
 import uuid
 from browser_use.browser.context import BrowserContext

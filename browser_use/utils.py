@@ -610,8 +610,11 @@ async def save_failure_screenshot(browser_session, task_id: str) -> str | None:
 		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 		filename = f'screenshots/failure_task_{task_id}_{timestamp}.png'
 		# Save the screenshot
-		with open(filename, 'wb') as f:
-			f.write(base64.b64decode(screenshot_b64))
+		import anyio
+		async with await anyio.open_file(filename,"wb") as f:
+			# with open("network_logs/requests.json", "a") as f:
+			await f.write(base64.b64decode(screenshot_b64))
+
 		logger.info(f"Saved failure screenshot to {filename}")
 		return filename
 	except Exception as e:
