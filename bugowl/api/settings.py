@@ -121,9 +121,11 @@ INSTALLED_APPS = [
 	'corsheaders',
 	'channels',
 	'websocket',
-	"api",
-	"bugowl",
-
+	'api',
+	'bugowl',
+	'testcase',
+	'teststep',
+	'testask',
 ]
 
 MIDDLEWARE = [
