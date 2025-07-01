@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - bugowl-dev
+    paths-ignore:
+      - 'README.md'
+      - '*.md'
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
