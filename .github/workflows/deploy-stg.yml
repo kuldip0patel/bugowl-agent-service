@@ -1,0 +1,59 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - bugowl-dev
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            echo "🚀 Starting deployment..."
+
+            echo "📥 Pulling latest code..."
+            cd /home/ubuntu/code/bugowl-agent-service
+
+            # Reset any local changes and force checkout dev branch
+            git reset --hard HEAD
+            git clean -fd
+            git fetch origin
+            git checkout -f dev
+            git pull origin dev || {
+              echo "❌ Failed to pull code"
+              exit 1
+            }
+
+            echo "🏗️ Building Docker images..."
+            docker compose -f docker-compose.yml down || true
+            docker compose -f docker-compose.yml build --no-cache || {
+              echo "❌ Failed to build images"
+              exit 1
+            }
+
+            echo "🚀 Starting containers..."
+            docker compose -f docker-compose.yml up -d || {
+              echo "❌ Failed to start containers"
+              exit 1
+            }
+
+            echo "✅ Deployment completed successfully!"
+
+        # - name: Notify Slack - Success
+      # - name: Notify Slack - Failure
+      #   if: failure()
+      #   uses: slackapi/slack-github-action@v1.25.0
+      #   with:
+      #     channel-id: ${{ secrets.SLACK_STAGING_CHANNEL_ID }}
+      #     slack-message: "❌ BugOwl API Staging Deployment Failed!\nBranch: ${{ github.event.workflow_run.head_branch }}\nCommit: ${{ github.event.workflow_run.head_sha }}\nAuthor: ${{ github.event.workflow_run.head_commit.author.name }}\nMessage: ${{ github.event.workflow_run.head_commit.message }}"
+      #   env:
+      #     SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
