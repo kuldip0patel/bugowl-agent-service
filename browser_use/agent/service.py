@@ -1144,7 +1144,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
 			return True, False
 
-		if self.state.last_result and self.state.last_result[-1].success == False: #True/None are pass.
+		if self.state.last_result and self.state.last_result[-1].success is False:#None/True = Success
 			logger.error(f"Quitting... Peforming this action has failed: {self.state.last_result[-1]}")
 			return True, False
 
@@ -1295,7 +1295,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 					)
 
 
-				if self.state.last_result and self.state.last_result[-1].success == False:#True/None == successful
+				if self.state.last_result and self.state.last_result[-1].success is False: #None/True = Success
 					logger.error(f"STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} | LAST RESULT: {self.state.last_result[-1]} ")
 					break
 
