@@ -51,3 +51,6 @@ screenshots/
 videos/
 log/
 logs/
+
+staticfiles
+db.sqlite3

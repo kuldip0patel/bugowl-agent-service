@@ -42,7 +42,7 @@ if 'LOCAL' in ENVIRONMENT:
 	DEBUG = True
 
 DJANGO_SUPER_USER = 'admin'
-DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD','admin')
+DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD', 'admin')
 DJANGO_SUPER_USER_EMAIL = 'bugowl.qa@gmail.com'
 
 
@@ -121,9 +121,11 @@ INSTALLED_APPS = [
 	'corsheaders',
 	'channels',
 	'websocket',
-	"api",
-	"bugowl",
-
+	'api',
+	'bugowl',
+	'testcase',
+	'teststep',
+	'testask',
 ]
 
 MIDDLEWARE = [
