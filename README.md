@@ -1,7 +1,8 @@
+
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./static/browser-use-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="./static/browser-use.png">
-  <img alt="Shows a black Browser Use Logo in light color mode and a white one in dark color mode." src="./static/browser-use.png"  width="full">
+  <source media="(prefers-color-scheme: dark)" src="https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-logo-dark.png&w=256&q=75">
+  <source media="(prefers-color-scheme: light)" src="https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=256&q=75">
+  <img alt="BugOwl Logo - AI-powered browser automation platform" src="https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=256&q=75" width="400">
 </picture>
 
 <h1 align="center">Enable AI to control your browser 🤖</h1>
@@ -193,14 +194,40 @@ If you use Browser Use in your research or project, please cite:
   url = {https://github.com/browser-use/browser-use}
 }
 ```
-
- <div align="center"> <img src="https://github.com/user-attachments/assets/06fa3078-8461-4560-b434-445510c1766f" width="400"/> 
- 
-[![Twitter Follow](https://img.shields.io/twitter/follow/Gregor?style=social)](https://x.com/intent/user?screen_name=gregpr07)
-[![Twitter Follow](https://img.shields.io/twitter/follow/Magnus?style=social)](https://x.com/intent/user?screen_name=mamagnus00)
- 
- </div>
-
-<div align="center">
-Made with ❤️ in Zurich and San Francisco
- </div>
+<h2>
+Block Diagram
+</h2>
+<pre>
++---------------------+      +------------------------+
+|  User Code / Client |      |    LLM (Gemini, GPT...)|
+|  (Agent API / CLI)  |<---->|    Decision Engine      |
++---------------------+      +------------------------+
+           |                              ^
+           |                              |
+           v                              |
++---------------------+    DOM Snapshot   |
+| I/O & Planner       |------------------+
++---------------------+                   |
+           |                              |
+           v        Playwright Browser    |
++---------------------+-------------------+
+|  BrowserSession     |                   |
+|  (Playwright + Chromium)               |
++---------------------+                   |
+           |                              |
+           v                              |
++---------------------+                   |
+| DOM Extraction &    |                   |
+| Interactive Elements|                   |
++---------------------+                   |
+           |                              |
+           v                              |
++---------------------+                   |
+|       Memory &      |<------------------+
+|     Agent History   |
++---------------------+
+           ^
+           |
+           |
+    User-Defined Task
+ </pre>

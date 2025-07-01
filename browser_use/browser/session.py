@@ -3342,13 +3342,12 @@ class BrowserSession(BaseModel):
 			loadingOverlay.style.left = '0';
 			loadingOverlay.style.width = '100vw';
 			loadingOverlay.style.height = '100vh';
-			loadingOverlay.style.background = '#000';
+			loadingOverlay.style.background = '#fff';
 			loadingOverlay.style.zIndex = '99999';
 			loadingOverlay.style.overflow = 'hidden';
 
 			// Create the image element
 			const img = document.createElement('img');
-			//img.src = 'https://v0-bug-owl.vercel.app/_next/image?url=%2Fbugowl-logo.png&w=96&q=75';
 			img.src = 'https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
 			img.alt = 'Browser-Use';
 			img.style.width = '200px';
