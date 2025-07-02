@@ -342,3 +342,7 @@ CELERY_BROKER_URL = BROKER_URL
 CELERY_RESULT_BACKEND = BROKER_URL
 DJANGO_CACHE_LOCATION = os.getenv('DJANGO_CACHE_LOCATION') if 'DJANGO_CACHE_LOCATION' in os.environ else 'redis://redis:6381/1'
 REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else 'jhadfhjkahdfjkhf'
+
+# Have to do this because /agent/sys/bop gets redirected to /sys/bop otherwise. nginx sends /agent/sys/bop to the api server but django redirects after login to /sys/bop
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

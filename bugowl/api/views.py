@@ -11,7 +11,8 @@ class HealthCheckView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response({"status": "healthy"}, status=status.HTTP_200_OK)
+        print("API: INSIDE AGENT API HEALTH CHECK VIEW")
+        return Response({"status": "healthy", "message": "AGENT SERVICE: API is working"}, status=status.HTTP_200_OK)
 
 
 class CeleryHealthCheckView(APIView):
@@ -19,13 +20,14 @@ class CeleryHealthCheckView(APIView):
 
     def get(self, request):
         try:
+            print("CELERY: INSIDE AGENT CELERY HEALTH CHECK VIEW")
             # Create a test task
             task = health_check_task.delay()
             # Wait for the task to complete
             result = AsyncResult(task.id)
             result.get(timeout=5)  # Wait up to 5 seconds
             return Response(
-                {"status": "healthy", "message": "Celery is working"},
+                {"status": "healthy", "message": "AGENT SERVICE: Celery is working"},
                 status=status.HTTP_200_OK,
             )
         except Exception as e:
