@@ -17,7 +17,11 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path
+from .views import CeleryHealthCheckView, HealthCheckView
 
 urlpatterns = [
-	path('sys/bop/', admin.site.urls),
+	path('agent/sys/bop/', admin.site.urls),
+    path("agent/health_api/", HealthCheckView.as_view(), name="health_api"),
+    path("agent/health_celery/", CeleryHealthCheckView.as_view(), name="health_celery"),
+
 ]
