@@ -4,6 +4,15 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
 
+class AuthenticatedUser:
+	def __init__(self, user_id, user_email, first_name, last_name, is_authenticated):
+		self.user_id = user_id
+		self.user_email = user_email
+		self.first_name = first_name
+		self.last_name = last_name
+		self.is_authenticated = is_authenticated
+
+
 class JWTAuthentication(BaseAuthentication):
 	def authenticate(self, request):
 		auth_header = request.headers.get('Authorization')
@@ -22,13 +31,16 @@ class JWTAuthentication(BaseAuthentication):
 		except jwt.InvalidTokenError:
 			raise AuthenticationFailed('Invalid token.')
 
-		user_details = {
-			'user_id': payload.get('user_id'),
-			'user_email': payload.get('user_email'),
-			'first_name': payload.get('first_name'),
-			'last_name': payload.get('last_name'),
-		}
-		if not all(user_details.values()):
+		user_id = payload.get('user_id')
+		user_email = payload.get('user_email')
+		first_name = payload.get('first_name')
+		last_name = payload.get('last_name')
+
+		if not all([user_id, user_email, first_name, last_name]):
 			raise AuthenticationFailed('Token payload is missing user details.')
 
-		return (user_details, token)
+		user = AuthenticatedUser(
+			user_id=user_id, user_email=user_email, first_name=first_name, last_name=last_name, is_authenticated=True
+		)
+
+		return (user, token)
