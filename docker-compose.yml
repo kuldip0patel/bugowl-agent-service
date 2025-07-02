@@ -5,7 +5,7 @@ volumes:
   logs_volume:
 
 services:
-  redis-agent:
+  redis:
     image: redis
     command: redis-server --port 6381
     ports:
@@ -30,14 +30,14 @@ services:
     ports:
       - 8020:8020
     links:
-      - redis-agent
+      - redis
     depends_on:
-      - redis-agent
+      - redis
     networks:
       - app-network
     user: root  # Run as root to avoid permission issues
 
-  celery-agent: 
+  celery: 
     build: .
     command: bash -c "cd /app/bugowl && /app/.venv/bin/celery -A api.celery_app worker -l info"
     env_file:
@@ -49,13 +49,13 @@ services:
       - ./bugowl:/app/bugowl:delegated
       - ./.env:/app/.env:delegated
     links:
-      - redis-agent
+      - redis
     depends_on:
-      - redis-agent
+      - redis
     networks:
       - app-network
 
 networks:
   app-network:
-    external: true
+    external: false
     driver: bridge
