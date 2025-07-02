@@ -43,8 +43,8 @@ class JWTAuthMiddleware(BaseMiddleware):
 	def _get_token_from_scope(self, scope):
 		headers = dict(scope.get('headers', []))
 		auth_header = headers.get(b'authorization', b'').decode('utf-8')
-		if auth_header.startswith('Bearer '):
-			return auth_header[7:]
+		if auth_header.startswith('Token '):
+			return auth_header[6:]
 
 		# fallback to query param
 		query_string = scope.get('query_string', b'').decode('utf-8')

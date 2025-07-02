@@ -1,0 +1,71 @@
+from main api server 
+1. user will create a job , the job instance will be saved.
+2. as job instance is saved with queued status initially , signal will be called to update the job status and case/suite.
+3. then execute_jobtask will be called , which executes that job.
+4. this task will send the data to the agent server api.
+5. agent server api will get those data , and store it in the database, and executes the job
+6. jobs will have testsuite > testcases > testtask or testcases > testtasks
+7. agent will take the first testcase from the job, send a main server api to update status of JOB: RUNNING , TESTCASE[id]:Running.
+8. agent will execute the testcase and send a main server api to update status of JOB: POINT NO.9 , TESTCASE[ID]:PASS/FAILED.
+9. agent will check the job type , if test_case and testcase is executed  then status of JOB:STATUS OF TESTCASE(PASS/FAILED)
+    if test_suite m agent will check the fellow testcases , if there are not executed testcases then status of JOB: RUNNING
+    if all the testcases are executed , all are passed , Status of JOB : PASS , if one failed , status of JOB: FAIL.
+
+10. execution completes.
+
+
+
+DATA to be send from mainserevr to agent server:
+    - JOB details
+    - Test_suite / Testcase details
+    - environment details
+    - testdata details of the selected environments.
+    - test_suite + test_cases details + testtask details 
+            OR
+    - testcase + testtask details
+
+structure: 
+{
+    job:{
+        job field_styles
+        ..
+        ..
+        ..
+
+    }
+    test_suite:{
+        NONE
+        or 
+        TestSuite fields
+        ..
+        ..
+        ..
+    }
+    test_case:{
+        test_case fields
+        ...
+        ...
+        ..
+    }
+    environments:[
+        {Nth Environment fields}
+        ..
+        ..
+        ..
+    ]
+    test_data:{
+        Nth environment:{
+            test_data fields
+            ..
+            ..
+            data:{
+                data fields
+                ..
+                ..
+            }
+        }
+        ..
+        ..
+        ...
+    }
+}
