@@ -8,30 +8,30 @@ from .tasks import health_check_task
 
 
 class HealthCheckView(APIView):
-    permission_classes = [AllowAny]
+	permission_classes = [AllowAny]
 
-    def get(self, request):
-        print("API: INSIDE AGENT API HEALTH CHECK VIEW")
-        return Response({"status": "healthy", "message": "AGENT SERVICE: API is working"}, status=status.HTTP_200_OK)
+	def get(self, request):
+		print('API: INSIDE AGENT API HEALTH CHECK VIEW')
+		return Response({'status': 'healthy', 'message': 'AGENT SERVICE: API is working'}, status=status.HTTP_200_OK)
 
 
 class CeleryHealthCheckView(APIView):
-    permission_classes = [AllowAny]
+	permission_classes = [AllowAny]
 
-    def get(self, request):
-        try:
-            print("CELERY: INSIDE AGENT CELERY HEALTH CHECK VIEW")
-            # Create a test task
-            task = health_check_task.delay()
-            # Wait for the task to complete
-            result = AsyncResult(task.id)
-            result.get(timeout=5)  # Wait up to 5 seconds
-            return Response(
-                {"status": "healthy", "message": "AGENT SERVICE: Celery is working"},
-                status=status.HTTP_200_OK,
-            )
-        except Exception as e:
-            return Response(
-                {"status": "unhealthy", "error": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+	def get(self, request):
+		try:
+			print('CELERY: INSIDE AGENT CELERY HEALTH CHECK VIEW')
+			# Create a test task
+			task = health_check_task.delay()
+			# Wait for the task to complete
+			result = AsyncResult(task.id)
+			result.get(timeout=5)  # Wait up to 5 seconds
+			return Response(
+				{'status': 'healthy', 'message': 'AGENT SERVICE: Celery is working'},
+				status=status.HTTP_200_OK,
+			)
+		except Exception as e:
+			return Response(
+				{'status': 'unhealthy', 'error': str(e)},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)

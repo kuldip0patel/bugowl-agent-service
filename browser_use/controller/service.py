@@ -180,8 +180,8 @@ class Controller(Generic[Context]):
 			pre_click_element_count = len(pre_click_state.selector_map) if pre_click_state.selector_map else 0
 
 			# Get element text for better reporting
-			element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else "Unknown"
-			element_tag = element_node.tag_name if element_node else "unknown"
+			element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else 'Unknown'
+			element_tag = element_node.tag_name if element_node else 'unknown'
 
 			msg = None
 
@@ -223,26 +223,26 @@ class Controller(Generic[Context]):
 
 					# Check for element count change
 					if pre_click_element_count != post_click_element_count:
-						changes.append(f"page elements changed from {pre_click_element_count} to {post_click_element_count}")
+						changes.append(f'page elements changed from {pre_click_element_count} to {post_click_element_count}')
 
 					# Check if clicked element disappeared
 					if not element_still_exists:
 						changes.append(f"Clicked {element_tag} '{element_text}' disappeared from page")
 					elif element_changed:
-						changes.append(f"Clicked {element_tag} and content changed")
+						changes.append(f'Clicked {element_tag} and content changed')
 
 					# Check for new tab
 					if len(browser_session.tabs) > initial_pages:
-						changes.append("new tab opened")
+						changes.append('new tab opened')
 						emoji = '🔗'
 
 					# Build the message
 					base_msg = f"Successfully clicked {element_tag} with index {params.index}: '{element_text}'"
 					if changes:
-						change_summary = " | ".join(changes)
-						msg = f"{base_msg} | {change_summary}"
+						change_summary = ' | '.join(changes)
+						msg = f'{base_msg} | {change_summary}'
 					else:
-						msg = f"{base_msg} | No visible page changes detected"
+						msg = f'{base_msg} | No visible page changes detected'
 
 				logger.info(f'{emoji} {msg}')
 				logger.debug(f'Element xpath: {element_node.xpath}')
