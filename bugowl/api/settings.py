@@ -41,9 +41,9 @@ LOGGER = ENVIRONMENT
 if 'LOCAL' in ENVIRONMENT:
 	DEBUG = True
 
-DJANGO_SUPER_USER = os.getenv('DJANGO_SUPER_USER','admin') 
-DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD','admin')
-DJANGO_SUPER_USER_EMAIL = os.getenv('DJANGO_SUPER_USER_EMAIL','bugowl.qa@gmail.com') 
+DJANGO_SUPER_USER = os.getenv('DJANGO_SUPER_USER', 'admin')
+DJANGO_SUPER_USER_PASSWORD = os.getenv('DJANGO_SUPER_USER_PASSWORD', 'admin')
+DJANGO_SUPER_USER_EMAIL = os.getenv('DJANGO_SUPER_USER_EMAIL', 'bugowl.qa@gmail.com')
 
 
 ALLOWED_HOSTS = [
@@ -251,7 +251,7 @@ CACHES = {
 		'LOCATION': os.getenv('DJANGO_CACHE_LOCATION'),
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-			'password': os.getenv('REDIS_AUTH_TOKEN'),
+			'password': os.getenv('REDIS_AUTH_TOKEN', None),
 		},
 	}
 }
@@ -341,7 +341,7 @@ BROKER_URL = os.getenv('BROKER_URL') if 'BROKER_URL' in os.environ else 'redis:/
 CELERY_BROKER_URL = BROKER_URL
 CELERY_RESULT_BACKEND = BROKER_URL
 DJANGO_CACHE_LOCATION = os.getenv('DJANGO_CACHE_LOCATION') if 'DJANGO_CACHE_LOCATION' in os.environ else 'redis://redis:6381/1'
-REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else 'jhadfhjkahdfjkhf'
+REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else ''
 
 # Have to do this because /agent/sys/bop gets redirected to /sys/bop otherwise. nginx sends /agent/sys/bop to the api server but django redirects after login to /sys/bop
 USE_X_FORWARDED_HOST = True
