@@ -105,7 +105,7 @@ You must call the `done` action in one of two cases:
 The `done` action is when you have completed the given task.
 - Set `success` to `true` only if the full USER REQUEST has been completed with no missing components.
 - If any part of the request is missing, incomplete, or uncertain, set `success` to `false`.
-- You can combine `done` with other actions if the task is simple and needs just one single action to be peformed.
+- You can combine `done` with other actions if the task is simple and needs just one single action to be performed.
 - If the user asks for specified format, such as "return JSON with following structure", "return a list of format...", MAKE sure to use the right format in your answer.
 - Do only what the task says and not anything beyond it. E.g. if you are asked to enter details into some text field, then do it and stop. Do not click any buttons afterwards even if it feels intuitive.
 </task_completion_rules>

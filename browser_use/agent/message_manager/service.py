@@ -23,7 +23,6 @@ from browser_use.llm.messages import (
 	BaseMessage,
 	ContentPartTextParam,
 	SystemMessage,
-	UserMessage,
 )
 from browser_use.utils import match_url_with_domain_pattern, time_execution_sync
 
@@ -137,7 +136,7 @@ class MessageManager:
 		# 	content='<example_1>\nHere is an example output of thinking and tool call. You can use it as a reference but do not copy it exactly.'
 		# )
 		# placeholder_message = HumanMessage(content='Example output:')
-		#self._add_message_with_type(placeholder_message, message_type='init')
+		# self._add_message_with_type(placeholder_message, message_type='init')
 
 		# Create base example content
 		example_content = {
@@ -177,7 +176,7 @@ After writing todo.md, I can also initialize a github.md file to accumulate the 
 The file system actions do not change the browser state, so I can also click on the bytedance/UI-TARS-desktop (index [4]) to start collecting information."""
 
 		example_tool_call_1 = AssistantMessage(content=json.dumps(example_content))
-		#self._add_message_with_type(example_tool_call_1, message_type='init')
+		# self._add_message_with_type(example_tool_call_1, message_type='init')
 		# self._add_message_with_type(
 		# 	UserMessage(
 		# 		content='Data written to todo.md.\nData written to github.md.\nClicked element with index 4.\n</example_1>',

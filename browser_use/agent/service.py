@@ -287,7 +287,7 @@ class Agent(Generic[Context]):
 
 		# Initialize message manager with state
 		# Initial system prompt with all actions - will be updated during each step
-		
+
 		# task_str = json.dumps({'tasks': tasks})
 		self._message_manager = MessageManager(
 			task=task,
@@ -371,7 +371,7 @@ class Agent(Generic[Context]):
 				id=uuid7str()[:-4] + self.id[-4:],  # re-use the same 4-char suffix so they show up together in logs
 			)
 
-		if self.sensitive_data and False: #No need to run this section
+		if self.sensitive_data and False:  # No need to run this section
 			# Check if sensitive_data has domain-specific credentials
 			has_domain_specific_credentials = any(isinstance(v, dict) for v in self.sensitive_data.values())
 
@@ -819,7 +819,6 @@ class Agent(Generic[Context]):
 
 			self.state.consecutive_failures = 0
 
-
 		except InterruptedError:
 			# self.logger.debug('Agent paused')
 			self.state.last_result = [
@@ -867,7 +866,6 @@ class Agent(Generic[Context]):
 				step_event = CreateAgentStepEvent.from_agent_step(self, model_output, result, actions_data, browser_state_summary)
 				self.eventbus.dispatch(step_event)
 		self.state.n_steps += 1
-
 
 	@time_execution_async('--handle_step_error (agent)')
 	async def _handle_step_error(self, error: Exception) -> list[ActionResult]:
@@ -1116,24 +1114,23 @@ class Agent(Generic[Context]):
 		"""
 		await self.step()
 		if not self.state.history.is_successful:
-			logger.error(f"HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}")
+			logger.error(f'HISTORY NOT SUCCESSFUL: {self.state.history.is_successful}')
 			return True, False
 
-		if self.state.last_result and self.state.last_result[-1].success is False:#None/True = Success
-			logger.error(f"Quitting... Peforming this action has failed: {self.state.last_result[-1]}")
+		if self.state.last_result and self.state.last_result[-1].success is False:  # None/True = Success
+			logger.error(f'Quitting... Performing this action has failed: {self.state.last_result[-1]}')
 			return True, False
 
-
-		#If error in action, then stop
+		# If error in action, then stop
 		if self.state.last_result and self.state.last_result[-1].error:
-			logger.error(f"LAST STEP ERROR: {self.state.last_result[-1].error}")
-			if "rate limit" in self.state.last_result[-1].error.lower():
-				logger.warning("Rate limit error detected, waiting and retrying...")
+			logger.error(f'LAST STEP ERROR: {self.state.last_result[-1].error}')
+			if 'rate limit' in self.state.last_result[-1].error.lower():
+				logger.warning('Rate limit error detected, waiting and retrying...')
 				await asyncio.sleep(self.settings.retry_delay)
 				return await self.take_step()
 			else:
 				return True, False
-			
+
 		if self.state.history.is_done():
 			await self.log_completion()
 			if self.register_done_callback:
@@ -1155,7 +1152,7 @@ class Agent(Generic[Context]):
 	) -> AgentHistoryList:
 		"""Execute the task with maximum number of steps"""
 		if not self._is_initialized:
-			logger.info(f"INITALISING AGENT!!!")
+			logger.info('INITIALISING AGENT!!!')
 			# loop = asyncio.get_event_loop()
 			agent_run_error: str | None = None  # Initialize error tracking variable
 			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
@@ -1196,10 +1193,10 @@ class Agent(Generic[Context]):
 			if self.initial_actions:
 				result = await self.multi_act(self.initial_actions, check_for_new_elements=False)
 				self.state.last_result = result
-			#self._is_initialized = True
-			#logger.info(f"AGENT IS INITIALISED!!!")
+			# self._is_initialized = True
+			# logger.info(f"AGENT IS INITIALISED!!!")
 
-		logger.info(f"Running the task {self.task} | UUID: {self.task_id}")
+		logger.info(f'Running the task {self.task} | UUID: {self.task_id}')
 		try:
 			for step in range(max_steps):
 				# Replace the polling with clean pause-wait
@@ -1253,13 +1250,14 @@ class Agent(Generic[Context]):
 				# 		else:
 				# 			break
 
-
-				if self.state.last_result and self.state.last_result[-1].success is False: #None/True = Success
-					logger.error(f"STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} | LAST RESULT: {self.state.last_result[-1]} ")
+				if self.state.last_result and self.state.last_result[-1].success is False:  # None/True = Success
+					logger.error(
+						f'STEP failed: {step_info} for FAILED TASK NUMBER :{self.task_id} | LAST RESULT: {self.state.last_result[-1]} '
+					)
 					# Take a screenshot of the failed state
 					# from browser_use.utils import save_failure_screenshot
-					# await save_failure_screenshot(self.browser_session, self.task_id)						
-					#self.pause()
+					# await save_failure_screenshot(self.browser_session, self.task_id)
+					# self.pause()
 					break
 				if self.state.history.is_done():
 					await self.log_completion()
@@ -1310,7 +1308,7 @@ class Agent(Generic[Context]):
 			await self.token_cost_service.log_usage_summary()
 
 			# Unregister signal handlers before cleanup
-			#signal_handler.unregister()
+			# signal_handler.unregister()
 
 			if not self._force_exit_telemetry_logged:  # MODIFIED: Check the flag
 				try:
@@ -1428,7 +1426,9 @@ class Agent(Generic[Context]):
 				action_params = getattr(action, action_name, '')
 				self.logger.info(f'☑️ Executed action {i + 1}/{len(actions)}: {action_name}({action_params})')
 				if results[-1].is_done or results[-1].error or i == len(actions) - 1:
-					logger.info(f"Breaking Actions Loop because the last result is... done?: { results[-1].is_done} | error?:{results[-1].error} ")
+					logger.info(
+						f'Breaking Actions Loop because the last result is... done?: {results[-1].is_done} | error?:{results[-1].error} '
+					)
 					break
 
 				await asyncio.sleep(self.browser_profile.wait_between_actions)

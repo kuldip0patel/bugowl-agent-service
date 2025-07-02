@@ -251,8 +251,8 @@ class Controller(Generic[Context]):
 			pre_click_element_count = len(pre_click_state.selector_map) if pre_click_state.selector_map else 0
 
 			# Get element text for better reporting
-			element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else "Unknown"
-			element_tag = element_node.tag_name if element_node else "unknown"
+			element_text = element_node.get_all_text_till_next_clickable_element(max_depth=2) if element_node else 'Unknown'
+			element_tag = element_node.tag_name if element_node else 'unknown'
 
 			msg = None
 
@@ -294,26 +294,26 @@ class Controller(Generic[Context]):
 
 					# Check for element count change
 					if pre_click_element_count != post_click_element_count:
-						changes.append(f"page elements changed from {pre_click_element_count} to {post_click_element_count}")
+						changes.append(f'page elements changed from {pre_click_element_count} to {post_click_element_count}')
 
 					# Check if clicked element disappeared
 					if not element_still_exists:
 						changes.append(f"Clicked {element_tag} '{element_text}' disappeared from page")
 					elif element_changed:
-						changes.append(f"Clicked {element_tag} and content changed")
+						changes.append(f'Clicked {element_tag} and content changed')
 
 					# Check for new tab
 					if len(browser_session.tabs) > initial_pages:
-						changes.append("new tab opened")
+						changes.append('new tab opened')
 						emoji = '🔗'
 
 					# Build the message
 					base_msg = f"Successfully clicked {element_tag} with index {params.index}: '{element_text}'"
 					if changes:
-						change_summary = " | ".join(changes)
-						msg = f"{base_msg} | {change_summary}"
+						change_summary = ' | '.join(changes)
+						msg = f'{base_msg} | {change_summary}'
 					else:
-						msg = f"{base_msg} | No visible page changes detected"
+						msg = f'{base_msg} | No visible page changes detected'
 
 				logger.info(f'{emoji} {msg}')
 				logger.debug(f'Element xpath: {element_node.xpath}')
@@ -332,10 +332,12 @@ class Controller(Generic[Context]):
 					# Page navigated during click - refresh state and return it
 					logger.info('Page navigated during click, refreshing state...')  # Changed from error to info
 					await browser_session.get_state_summary(cache_clickable_elements_hashes=True)
-					msg = f'Clicked {element_tag} with index {params.index}: \'{element_text}\' | Page navigated successfully (context destroyed during navigation).'
+					msg = f"Clicked {element_tag} with index {params.index}: '{element_text}' | Page navigated successfully (context destroyed during navigation)."
 					return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=msg)
 				else:
-					logger.warning(f'Element not clickable with index {params.index} - most likely the page changed', exc_info=True)
+					logger.warning(
+						f'Element not clickable with index {params.index} - most likely the page changed', exc_info=True
+					)
 					return ActionResult(error=error_msg, success=False)
 
 		@self.registry.action(
@@ -422,16 +424,15 @@ class Controller(Generic[Context]):
 				include_in_memory=True,
 				long_term_memory=f'Closed tab {params.page_id} with url {url}, now focused on tab {new_page_idx} with url {new_page.url}.',
 			)
-		
+
 		@self.registry.action('Navigate to a specific url in the current tab', param_model=OpenTabAction)
 		async def navigate_in_current_tab(params: OpenTabAction, browser_session: BrowserSession):
 			page = await browser_session.get_current_page()
 			await page.goto(params.url)
 			msg = f'🔗  Navigated current tab to {params.url}'
 			logger.info(msg)
-			return ActionResult(
-				extracted_content=msg, include_in_memory=True, long_term_memory=f'Navigated to URL {params.url}'
-			)
+			return ActionResult(extracted_content=msg, include_in_memory=True, long_term_memory=f'Navigated to URL {params.url}')
+
 		# Content Actions
 		@self.registry.action(
 			"""Extract structured, semantic data (e.g. product description, price, all information about XYZ) from the current webpage based on a textual query.

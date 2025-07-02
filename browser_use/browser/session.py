@@ -1529,7 +1529,7 @@ class BrowserSession(BaseModel):
 
 			# Check if element is likely to cause navigation
 			is_navigation_element = self._is_navigation_element(element_node)
-			
+
 			async def perform_click(click_func):
 				"""Performs the actual click, handling both download and navigation scenarios."""
 
@@ -1583,10 +1583,10 @@ class BrowserSession(BaseModel):
 						await element_handle.click(timeout=1500)
 						# Small delay to ensure click completes before navigation
 						await asyncio.sleep(0.1)
-					
+
 					# Wait for the navigation to complete
 					await navigation_info.value
-					
+
 					# Check if navigation was successful
 					await self._check_and_handle_navigation(page)
 					return None  # Success
@@ -1600,7 +1600,11 @@ class BrowserSession(BaseModel):
 				raise e
 			except Exception as e:
 				# Check if it's a context error and provide more info
-				if 'Cannot find context with specified id' in str(e) or 'Protocol error' in str(e) or 'Execution context was destroyed' in str(e):
+				if (
+					'Cannot find context with specified id' in str(e)
+					or 'Protocol error' in str(e)
+					or 'Execution context was destroyed' in str(e)
+				):
 					self.logger.warning(f'⚠️ Element context lost, attempting to re-locate element: {type(e).__name__}')
 					# Try to re-locate the element
 					element_handle = await self.get_locate_element(element_node)
@@ -1648,36 +1652,36 @@ class BrowserSession(BaseModel):
 		Check if an element is likely to cause navigation when clicked.
 		"""
 		attributes = element_node.attributes or {}
-		
+
 		# Check for href attribute (links)
 		if 'href' in attributes and attributes['href']:
 			href = attributes['href']
 			# Skip javascript: and # links
 			if not href.startswith('javascript:') and not href.startswith('#'):
 				return True
-		
+
 		# Check for form submission elements
 		if element_node.tag_name.lower() in ['button', 'input']:
 			button_type = attributes.get('type', '').lower()
 			if button_type in ['submit']:
 				return True
-		
+
 		# Check for onclick handlers that might cause navigation
 		if 'onclick' in attributes:
 			onclick = attributes['onclick'].lower()
 			if any(nav_keyword in onclick for nav_keyword in ['location', 'window.open', 'navigate', 'redirect']):
 				return True
-		
+
 		# Check for data attributes that might indicate navigation
 		if any(attr.startswith('data-') and 'nav' in attr.lower() for attr in attributes.keys()):
 			return True
-		
+
 		# Check for common navigation-related classes
 		classes = attributes.get('class', '').lower()
 		nav_classes = ['nav', 'navigation', 'menu', 'link', 'button', 'tab']
 		if any(nav_class in classes for nav_class in nav_classes):
 			return True
-		
+
 		return False
 
 	@require_initialization
