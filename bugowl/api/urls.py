@@ -16,12 +16,15 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
+
 from .views import CeleryHealthCheckView, HealthCheckView
 
 urlpatterns = [
 	path('agent/sys/bop/', admin.site.urls),
-    path("agent/health_api/", HealthCheckView.as_view(), name="health_api"),
-    path("agent/health_celery/", CeleryHealthCheckView.as_view(), name="health_celery"),
-
+	path('agent/health_api/', HealthCheckView.as_view(), name='health_api'),
+	path('agent/health_celery/', CeleryHealthCheckView.as_view(), name='health_celery'),
+	path('agent/testcase/', include('testcase.urls')),
+	# path("agent/testask/", include("testask.urls")),
+	# path("agent/teststep/", include("teststep.urls")),
 ]

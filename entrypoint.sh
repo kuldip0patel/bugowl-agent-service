@@ -113,4 +113,4 @@ $PYTHON_BIN $MANAGE_PY create_admin_user
 
 echo "STARTING SERVER WITH DAPHNE"
 cd /app/bugowl
-/app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
+watchmedo auto-restart --patterns="*.py" --recursive -- /app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
