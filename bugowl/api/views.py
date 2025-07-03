@@ -9,6 +9,7 @@ from .tasks import health_check_task
 
 class HealthCheckView(APIView):
 	permission_classes = [AllowAny]
+	authentication_classes = []  # Disable authentication entirely for this view
 
 	def get(self, request):
 		print('API: INSIDE AGENT API HEALTH CHECK VIEW')
@@ -17,6 +18,7 @@ class HealthCheckView(APIView):
 
 class CeleryHealthCheckView(APIView):
 	permission_classes = [AllowAny]
+	authentication_classes = []  # Disable authentication entirely for this view
 
 	def get(self, request):
 		try:
