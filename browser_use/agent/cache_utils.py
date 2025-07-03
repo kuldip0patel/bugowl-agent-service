@@ -103,11 +103,11 @@ def hash_messages(messages: list[BaseMessage]) -> str:
 		if hasattr(msg, 'name') and msg.name:
 			msg_data['name'] = msg.name
 
-		if hasattr(msg, 'refusal') and msg.refusal:
-			msg_data['refusal'] = msg.refusal
+		if hasattr(msg, 'refusal') and getattr(msg, 'refusal', None):
+			msg_data['refusal'] = getattr(msg, 'refusal')
 
-		if hasattr(msg, 'tool_calls') and msg.tool_calls:
-			msg_data['tool_calls'] = _serialize_tool_calls(msg.tool_calls)
+		if hasattr(msg, 'tool_calls') and getattr(msg, 'tool_calls', None):
+			msg_data['tool_calls'] = _serialize_tool_calls(getattr(msg, 'tool_calls'))
 
 		serialized_messages.append(msg_data)
 
@@ -203,7 +203,7 @@ class LLMResponseCache:
 		"""
 		try:
 			cached_data = self.cache.get(messages_hash)
-			if cached_data is not None:
+			if cached_data is not None and isinstance(cached_data, dict):
 				logger.debug(f'Cache hit for hash {messages_hash[:16]}...')
 				return cached_data
 			else:
@@ -239,7 +239,9 @@ class LLMResponseCache:
 	def stats(self) -> dict[str, Any]:
 		"""Get cache statistics."""
 		try:
-			return {'size': len(self.cache), 'volume': self.cache.volume(), 'directory': str(self.cache_dir)}
+			# Use getattr to safely access cache size
+			cache_size = getattr(self.cache, '__len__', lambda: 0)()
+			return {'size': cache_size, 'volume': self.cache.volume(), 'directory': str(self.cache_dir)}
 		except Exception as e:
 			logger.warning(f'Error getting cache stats: {e}')
 			return {}
