@@ -54,7 +54,10 @@ def run_agent_in_subprocess_module(task_description):
 		if len(result.history) > 0:
 			last_history = result.history[-1]
 			if last_history.model_output and last_history.model_output.action:
-				has_done = any(hasattr(action, 'done') for action in last_history.model_output.action)
+				has_done = any(
+					hasattr(action, 'done') and getattr(action, 'done', None) is not None
+					for action in last_history.model_output.action
+				)
 		return {'success': has_done, 'error': None}
 	except Exception as e:
 		return {'success': False, 'error': str(e)}
@@ -102,7 +105,10 @@ class TestParallelism:
 		# Check that the last action was 'done'
 		last_history = result.history[-1]
 		if last_history.model_output and last_history.model_output.action:
-			assert any(hasattr(action, 'done') for action in last_history.model_output.action)
+			assert any(
+				hasattr(action, 'done') and getattr(action, 'done', None) is not None
+				for action in last_history.model_output.action
+			)
 
 	async def test_one_event_loop_two_parallel_agents(self):
 		"""Test one event loop with two different parallel agents"""
@@ -147,7 +153,10 @@ class TestParallelism:
 				assert len(result.history) > 0
 				last_history = result.history[-1]
 				if last_history.model_output and last_history.model_output.action:
-					assert any(hasattr(action, 'done') for action in last_history.model_output.action)
+					assert any(
+						hasattr(action, 'done') and getattr(action, 'done', None) is not None
+						for action in last_history.model_output.action
+					)
 
 			# Verify they used different browser sessions
 			assert agent1.browser_session is not agent2.browser_session
@@ -196,7 +205,10 @@ class TestParallelism:
 				assert len(result.history) > 0
 				last_history = result.history[-1]
 				if last_history.model_output and last_history.model_output.action:
-					assert any(hasattr(action, 'done') for action in last_history.model_output.action)
+					assert any(
+						hasattr(action, 'done') and getattr(action, 'done', None) is not None
+						for action in last_history.model_output.action
+					)
 
 			# Verify they used different browser sessions
 			assert agent1.browser_session is not agent2.browser_session
