@@ -116,12 +116,16 @@ async def run_tasks(tasks: list[str]):
 	print('BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....')
 
 	# Load sensitive data from environment variables
-	sensitive_data = {
-		'baya_password': os.getenv('BAYA_PASSWORD'),
-		'hubspot_email': os.getenv('HUBSPOT_EMAIL'),
-		'hubspot_password': os.getenv('HUBSPOT_PASSWORD'),
+	sensitive_data: dict[str, str | dict[str, str]] = {
+		key: value
+		for key, value in {
+			'baya_password': os.getenv('BAYA_PASSWORD'),
+			'hubspot_email': os.getenv('HUBSPOT_EMAIL'),
+			'hubspot_password': os.getenv('HUBSPOT_PASSWORD'),
+		}.items()
+		if value is not None
 	}
-
+	print(sensitive_data)
 	print('BUGOWL: Running tasks ONE BY ONE')
 	agent = None
 	results = []

@@ -1,20 +1,32 @@
 import logging
 import os
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-import cv2
-import numpy as np
+if TYPE_CHECKING:
+	import cv2  # type: ignore[import-untyped]
+	import numpy as np  # type: ignore[import-untyped]
+else:
+	try:
+		import cv2  # type: ignore[import-untyped]
+		import numpy as np  # type: ignore[import-untyped]
+	except ImportError:
+		cv2 = None  # type: ignore
+		np = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 
 class VideoRecorder:
 	def __init__(self, save_dir: str, width: int = 1920, height: int = 1080, fps: int = 30):
+		if cv2 is None:
+			raise ImportError('OpenCV (cv2) is required for video recording. Install with: pip install opencv-python')
+
 		self.save_dir = save_dir
 		self.width = width
 		self.height = height
 		self.fps = fps
-		self.current_video: cv2.VideoWriter | None = None
+		self.current_video: 'cv2.VideoWriter' | None = None  # type: ignore
 		self.current_filename: str | None = None
 
 		# Create save directory if it doesn't exist

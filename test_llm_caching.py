@@ -57,10 +57,12 @@ def test_agent_output_serialization():
 	from browser_use.controller.views import DoneAction
 
 	# Create a test action model with a done field
-	TestActionModel = create_model('TestActionModel', __base__=ActionModel, done=(DoneAction | None, None))
+	TestActionModel = create_model(  # type: ignore
+		'TestActionModel', __base__=ActionModel, done=(DoneAction | None, None)
+	)
 
 	# Create a mock action using the proper structure
-	action = TestActionModel(done=DoneAction(success=True, text='Task completed'))
+	action = TestActionModel(done=DoneAction(success=True, text='Task completed'))  # type: ignore[call-arg]
 
 	# Create test AgentOutput
 	original_output = AgentOutput(

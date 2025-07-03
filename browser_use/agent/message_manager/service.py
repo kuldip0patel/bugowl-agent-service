@@ -175,7 +175,7 @@ Since this appears to be a multi-step task involving visiting multiple repositor
 After writing todo.md, I can also initialize a github.md file to accumulate the information I've collected.
 The file system actions do not change the browser state, so I can also click on the bytedance/UI-TARS-desktop (index [4]) to start collecting information."""
 
-		example_tool_call_1 = AssistantMessage(content=json.dumps(example_content))
+		_example_tool_call_1 = AssistantMessage(content=json.dumps(example_content))
 		# self._add_message_with_type(example_tool_call_1, message_type='init')
 		# self._add_message_with_type(
 		# 	UserMessage(
@@ -413,7 +413,7 @@ Next Goal: {model_output.current_state.next_goal}
 
 	@time_execution_sync('--filter_sensitive_data')
 	def _filter_sensitive_data(self, message: BaseMessage) -> BaseMessage:
-		"""Filter out sensitive data from the message"""
+		"""Filter out sensitive data from the message by replacing actual values with placeholder tags"""
 
 		def replace_sensitive(value: str) -> str:
 			if not self.settings.sensitive_data:
@@ -438,9 +438,9 @@ Next Goal: {model_output.current_state.next_goal}
 				logger.warning('No valid entries found in sensitive_data dictionary')
 				return value
 
-			# Replace all valid sensitive data values with their placeholder tags
+			# Replace all actual sensitive values with their placeholder tags (reverse of _replace_sensitive_data)
 			for key, val in sensitive_values.items():
-				value = value.replace(f'<secret>{key}</secret>', val)
+				value = value.replace(val, f'<secret>{key}</secret>')
 
 			return value
 

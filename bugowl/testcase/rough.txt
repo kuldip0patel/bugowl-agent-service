@@ -46,26 +46,25 @@ structure:
         ...
         ...
         ..
+        testtask:[
+            testtask fields
+            ..
+            ..
+            ..
+        ]
     }
-    environments:[
-        {Nth Environment fields}
+    environment:{
+        environment fields
         ..
         ..
-        ..
-    ]
+    }
     test_data:{
-        Nth environment:{
-            test_data fields
-            ..
-            ..
-            data:{
-                data fields
-                ..
-                ..
-            }
+        test_data_name : {
+            testdata key value paris
         }
-        ..
-        ..
         ...
+        ..
+        ..
+        ..
     }
 }

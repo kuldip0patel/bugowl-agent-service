@@ -10,10 +10,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from lmnr import Laminar
-
 try:
-	Laminar.initialize(project_api_key=os.getenv('LMNR_PROJECT_API_KEY'))
+	from lmnr import Laminar  # type: ignore[import-untyped]
+
+	Laminar.initialize(project_api_key=os.getenv('LMNR_PROJECT_API_KEY'))  # type: ignore
+except ImportError:
+	Laminar = None  # type: ignore
 except Exception:
 	pass
 
