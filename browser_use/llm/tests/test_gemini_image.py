@@ -3,8 +3,17 @@ import base64
 import io
 import random
 
-from lmnr import Laminar
-from PIL import Image, ImageDraw, ImageFont
+try:
+	from lmnr import Laminar  # type: ignore[import-untyped]
+except ImportError:
+	Laminar = None  # type: ignore
+
+try:
+	from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-untyped]
+except ImportError:
+	Image = None  # type: ignore
+	ImageDraw = None  # type: ignore
+	ImageFont = None  # type: ignore
 
 from browser_use.llm.google.chat import ChatGoogle
 from browser_use.llm.google.serializer import GoogleMessageSerializer
@@ -17,20 +26,24 @@ from browser_use.llm.messages import (
 	UserMessage,
 )
 
-Laminar.initialize()
+if Laminar is not None:
+	Laminar.initialize()  # type: ignore
 
 
 def create_random_text_image(text: str = 'hello world', width: int = 4000, height: int = 4000) -> str:
+	if Image is None or ImageDraw is None or ImageFont is None:
+		raise ImportError('PIL (Pillow) is required for image generation. Install with: pip install Pillow')
+
 	# Create image with random background color
 	bg_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-	image = Image.new('RGB', (width, height), bg_color)
-	draw = ImageDraw.Draw(image)
+	image = Image.new('RGB', (width, height), bg_color)  # type: ignore
+	draw = ImageDraw.Draw(image)  # type: ignore
 
 	# Try to use a default font, fallback to default if not available
 	try:
-		font = ImageFont.truetype('arial.ttf', 24)
+		font = ImageFont.truetype('arial.ttf', 24)  # type: ignore
 	except Exception:
-		font = ImageFont.load_default()
+		font = ImageFont.load_default()  # type: ignore
 
 	# Calculate text position to center it
 	bbox = draw.textbbox((0, 0), text, font=font)
@@ -73,7 +86,7 @@ async def test_gemini_image_vision():
 
 	# Serialize messages for Google format
 	serializer = GoogleMessageSerializer()
-	formatted_messages, system_message = serializer.serialize_messages(messages)
+	_formatted_messages, system_message = serializer.serialize_messages(messages)
 
 	print('Testing Gemini image vision...')
 	print(f'System message: {system_message}')

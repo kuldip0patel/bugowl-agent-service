@@ -36,14 +36,14 @@ repos:
     hooks:
       - id: ruff-syntax-check
         name: ruff syntax check (matches CI lint-syntax)
-        entry: python -m ruff check --no-fix --select PLE
+        entry: uv run ruff check --no-fix --select PLE
         language: system
         types: [python]
         pass_filenames: false
         always_run: true
       - id: pyright-typecheck
         name: pyright type checker (matches CI lint-typecheck) - run manually with 'pre-commit run pyright-typecheck'
-        entry: python -m pyright
+        entry: uv run pyright
         language: system
         types: [python]
         pass_filenames: false

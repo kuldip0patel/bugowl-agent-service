@@ -96,7 +96,11 @@ async def test_enhanced_click():
 						break
 
 			if button_index is not None:
-				click_action = ActionModel(click_element_by_index=ClickElementAction(index=button_index))
+				# Create a proper action model for click_element_by_index
+				class ClickActionModel(ActionModel):
+					click_element_by_index: ClickElementAction | None = None
+
+				click_action = ClickActionModel(click_element_by_index=ClickElementAction(index=button_index))
 				result = await controller.act(click_action, browser_session)
 				print(f'Result: {result.extracted_content}')
 				print(f'Success: {result.success}')
@@ -121,7 +125,11 @@ async def test_enhanced_click():
 						break
 
 			if button_index is not None:
-				click_action = ActionModel(click_element_by_index=ClickElementAction(index=button_index))
+				# Create a proper action model for click_element_by_index
+				class ClickActionModel2(ActionModel):
+					click_element_by_index: ClickElementAction | None = None
+
+				click_action = ClickActionModel2(click_element_by_index=ClickElementAction(index=button_index))
 				result = await controller.act(click_action, browser_session)
 				print(f'Result: {result.extracted_content}')
 				print(f'Success: {result.success}')
