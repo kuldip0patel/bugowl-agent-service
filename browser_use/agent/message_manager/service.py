@@ -358,7 +358,7 @@ class MessageManager:
 
 	@time_execution_sync('--filter_sensitive_data')
 	def _filter_sensitive_data(self, message: BaseMessage) -> BaseMessage:
-		"""Filter out sensitive data from the message"""
+		"""Filter out sensitive data from the message by replacing actual values with placeholder tags"""
 
 		def replace_sensitive(value: str) -> str:
 			if not self.sensitive_data:
@@ -383,9 +383,9 @@ class MessageManager:
 				logger.warning('No valid entries found in sensitive_data dictionary')
 				return value
 
-			# Replace all valid sensitive data values with their placeholder tags
+			# Replace all actual sensitive values with their placeholder tags (reverse of _replace_sensitive_data)
 			for key, val in sensitive_values.items():
-				value = value.replace(f'<secret>{key}</secret>', val)
+				value = value.replace(val, f'<secret>{key}</secret>')
 
 			return value
 

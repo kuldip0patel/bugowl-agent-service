@@ -50,7 +50,7 @@ class Registry(Generic[Context]):
 			'browser_context': BrowserSession,  # legacy name
 			'page': Page,
 			'page_extraction_llm': BaseChatModel,
-			'available_file_paths': list,
+			'available_file_paths': list,  # Use built-in list type
 			'has_sensitive_data': bool,
 			'file_system': FileSystem,
 		}
@@ -58,7 +58,7 @@ class Registry(Generic[Context]):
 	def _normalize_action_function_signature(
 		self,
 		func: Callable,
-		description: str,
+		_description: str,  # Unused but kept for API compatibility
 		param_model: type[BaseModel] | None = None,
 	) -> tuple[Callable, type[BaseModel]]:
 		"""
@@ -158,7 +158,7 @@ class Registry(Generic[Context]):
 
 			# Prepare arguments for original function
 			call_args = []
-			call_kwargs = {}
+			_call_kwargs = {}  # Reserved for future use
 
 			# Handle Type 1 pattern (first arg is the param model)
 			if param_model_provided and parameters and parameters[0].name not in special_param_names:
@@ -371,15 +371,14 @@ class Registry(Generic[Context]):
 				return await action.function(params=validated_params, **special_context)
 			except Exception as e:
 				# Retry once if it's a page error
-				# logger.warning(f'⚠️ Action {action_name}() failed: {type(e).__name__}: {e}, trying one more time...')
-				# special_context['page'] = browser_session and await browser_session.get_current_page()
-				# try:
-				# 	return await action.function(params=validated_params, **special_context)
-				# except Exception as retry_error:
-				# 	raise RuntimeError(
-				# 		f'Action {action_name}() failed: {type(e).__name__}: {e} (page may have closed or navigated away mid-action)'
-				# 	) from retry_error
-				raise
+				logger.warning(f'⚠️ Action {action_name}() failed: {type(e).__name__}: {e}, trying one more time...')
+				special_context['page'] = browser_session and await browser_session.get_current_page()
+				try:
+					return await action.function(params=validated_params, **special_context)
+				except Exception as retry_error:
+					raise RuntimeError(
+						f'Action {action_name}() failed: {type(e).__name__}: {e} (page may have closed or navigated away mid-action)'
+					) from retry_error
 
 		except ValueError as e:
 			# Preserve ValueError messages from validation
@@ -456,7 +455,7 @@ class Registry(Generic[Context]):
 				return {k: recursively_replace_secrets(v) for k, v in value.items()}
 			elif isinstance(value, list):
 				return [recursively_replace_secrets(v) for v in value]
-			return value
+			return value  # type: ignore[unreachable]
 
 		params_dump = params.model_dump()
 		processed_params = recursively_replace_secrets(params_dump)
@@ -508,7 +507,9 @@ class Registry(Generic[Context]):
 
 		for name, action in available_actions.items():
 			# Create an individual model for each action that contains only one field
-			individual_model = create_model(
+			# Use type: ignore to suppress pyright warnings about create_model field definitions
+			field_dict = {name: (action.param_model, Field(description=action.description))}
+			individual_model = create_model(  # type: ignore
 				f'{name.title().replace("_", "")}ActionModel',
 				__base__=ActionModel,
 				**{

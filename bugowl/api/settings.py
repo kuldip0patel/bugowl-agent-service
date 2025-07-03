@@ -62,6 +62,7 @@ ALLOWED_HOSTS = [
 	'stg.bugowl.helpchat.social',
 	'stg-bugowl.vercel.app',
 	'api',
+	'api-agent',
 ]
 
 

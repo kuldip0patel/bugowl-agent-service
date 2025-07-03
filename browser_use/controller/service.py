@@ -347,7 +347,7 @@ class Controller(Generic[Context]):
 			try:
 				await page.wait_for_load_state(state='domcontentloaded', timeout=5_000)
 				# page was already loaded when we first navigated, this is additional to wait for onfocus/onblur animations/ajax to settle
-			except Exception as e:
+			except Exception:
 				pass
 			msg = f'🔄  Switched to tab #{params.page_id} with url {page.url}'
 			logger.info(msg)

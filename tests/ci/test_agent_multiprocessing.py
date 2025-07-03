@@ -26,6 +26,19 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def has_done_action(action):
+	"""Check if an action has a 'done' field (either directly or in root)"""
+	# Check direct done attribute
+	if hasattr(action, 'done') and getattr(action, 'done', None) is not None:
+		return True
+	# Check root.done attribute (new structure)
+	if hasattr(action, 'root'):
+		root = getattr(action, 'root')
+		if root and hasattr(root, 'done') and getattr(root, 'done', None) is not None:
+			return True
+	return False
+
+
 def run_agent_in_subprocess_module(task_description):
 	"""Module-level function to run an agent in a subprocess"""
 	import asyncio
