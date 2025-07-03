@@ -11,7 +11,7 @@ from browser_use.agent.views import AgentHistoryList
 from browser_use.config import CONFIG
 
 if TYPE_CHECKING:
-	from PIL import Image, ImageFont
+	from PIL import Image, ImageFont  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,11 @@ def create_history_gif(
 		logger.warning('No history to create GIF from')
 		return
 
-	from PIL import Image, ImageFont
+	try:
+		from PIL import Image, ImageFont  # type: ignore[import-untyped]
+	except ImportError:
+		logger.error('PIL (Pillow) is required for GIF generation. Install with: pip install Pillow')
+		return
 
 	images = []
 
@@ -170,7 +174,11 @@ def _create_task_frame(
 	line_spacing: float = 1.5,
 ) -> Image.Image:
 	"""Create initial frame showing the task."""
-	from PIL import Image, ImageDraw, ImageFont
+	try:
+		from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-untyped]
+	except ImportError:
+		logger.error('PIL (Pillow) is required for GIF generation. Install with: pip install Pillow')
+		raise ImportError('PIL (Pillow) is required for GIF generation')
 
 	img_data = base64.b64decode(first_screenshot)
 	template = Image.open(io.BytesIO(img_data))
@@ -250,7 +258,11 @@ def _add_overlay_to_image(
 ) -> Image.Image:
 	"""Add step number and goal overlay to an image."""
 
-	from PIL import Image, ImageDraw
+	try:
+		from PIL import Image, ImageDraw  # type: ignore[import-untyped]
+	except ImportError:
+		logger.error('PIL (Pillow) is required for GIF generation. Install with: pip install Pillow')
+		raise ImportError('PIL (Pillow) is required for GIF generation')
 
 	goal_text = decode_unicode_escapes_to_utf8(goal_text)
 	image = image.convert('RGBA')
