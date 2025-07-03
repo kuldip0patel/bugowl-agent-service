@@ -17,7 +17,7 @@ class ExecuteJob(APIView):
 			self.validate_job(data.get('job'))
 			self.validate_test_suite(data.get('test_suite'))
 			self.validate_test_case(data.get('test_case'))
-			self.validate_environments(data.get('environments'))
+			self.validate_environment(data.get('environment'))
 			self.validate_test_data(data.get('test_data'))
 		except ValidationError as e:
 			logger.error('Validation Error: %s', str(e))
@@ -27,7 +27,7 @@ class ExecuteJob(APIView):
 		logger.info('Job Data: %s', data.get('job'))
 		logger.info('Test Suite: %s', data.get('test_suite'))
 		logger.info('Test Case: %s', data.get('test_case'))
-		logger.info('Environments: %s', data.get('environments'))
+		logger.info('Environment: %s', data.get('environment'))
 		logger.info('Test Data: %s', data.get('test_data'))
 
 		return Response({'message': 'JOB Received Successfully, Executing the JOB'}, status=status.HTTP_200_OK)
@@ -48,10 +48,10 @@ class ExecuteJob(APIView):
 			raise ValidationError("Missing 'test_case' field.")
 		# Add specific validation for test_case fields here
 
-	def validate_environments(self, environments):
-		if not isinstance(environments, list):
-			raise ValidationError("'environments' must be a list.")
-		for env in environments:
+	def validate_environment(self, environment):
+		if not isinstance(environment, dict):
+			raise ValidationError("'environment' must be a dictionary.")
+		for key, value in environment.items():
 			# Add specific validation for environment fields here
 			pass
 
