@@ -49,6 +49,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [manual]  # Only run when explicitly requested
+      - id: pytest-tests
+        name: pytest tests (matches CI test.yaml) - run manually with 'pre-commit run pytest-tests'
+        entry: bash -c 'for test_file in tests/ci/test_*.py; do echo "Running $test_file"; pytest --numprocesses auto -x "$test_file" || exit 1; done'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]  # Only run when explicitly requested
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
