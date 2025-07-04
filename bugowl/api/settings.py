@@ -125,6 +125,7 @@ INSTALLED_APPS = [
 	'websocket',
 	'api',
 	'bugowl',
+	'job',
 	'testcase',
 	'teststep',
 	'testask',
