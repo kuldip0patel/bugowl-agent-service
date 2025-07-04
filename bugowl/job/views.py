@@ -21,32 +21,35 @@ class ExecuteJob(APIView):
 		except ValidationError as e:
 			logger.error('Validation Error: %s', str(e))
 			return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+		try:
+			job_data = data.get('job')
+			test_suite_uuid = data.get('test_suite').get('uuid') if data.get('test_suite') else None
+			if not test_suite_uuid:
+				test_case_uuid = data.get('test_case')[0]['uuid'] if data.get('test_case') else None
+			else:
+				test_case_uuid = None
 
-		job_data = data.get('job')
-		test_suite_uuid = data.get('test_suite').get('uuid') if data.get('test_suite').get('uuid') else None
-		if not test_suite_uuid:
-			test_case_uuid = data.get('test_case')[0]['uuid'] if data.get('test_case') else None
-		else:
-			test_case_uuid = None
+			job_data = {
+				'job_uuid': job_data['uuid'],
+				'test_case_uuid': test_case_uuid,
+				'test_suite_uuid': test_suite_uuid,
+				'environment': data.get('environment'),
+				'job_type': job_data['job_type'],
+				'status': job_data['status'],
+				'business': job_data['Business'],
+				'project': job_data['Project'],
+				'created_by': job_data['created_by'],
+				'experimental': job_data['experimental'],
+				'payload': data,
+			}
 
-		job_data = {
-			'job_uuid': job_data['uuid'],
-			'test_case_uuid': test_case_uuid,
-			'test_suite_uuid': test_suite_uuid,
-			'environment': data.get('environment'),
-			'job_type': job_data['job_type'],
-			'status': job_data['status'],
-			'business': job_data['Business'],
-			'project': job_data['Project'],
-			'created_by': job_data['created_by'],
-			'experimental': job_data['experimental'],
-			'payload': data,
-		}
+			serializer = JobSerializer(data=job_data)
+			if not serializer.is_valid():
+				return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-		serializer = JobSerializer(data=job_data)
-		if not serializer.is_valid():
-			return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+			job_instance = serializer.save()
 
-		job_instance = serializer.save()
-
-		return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
+			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
+		except Exception as e:
+			logger.error('Error creating job: %s', str(e))
+			return Response({'error': 'Failed to create job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
