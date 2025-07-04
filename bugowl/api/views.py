@@ -26,6 +26,7 @@ class CeleryHealthCheckView(APIView):
 			# Create a test task
 			task = health_check_task.delay()
 			# Wait for the task to complete
+			print('AGENT: Waiting for Celery task to complete...')
 			result = AsyncResult(task.id)
 			result.get(timeout=5)  # Wait up to 5 seconds
 			return Response(
