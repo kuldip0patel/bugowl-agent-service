@@ -1,10 +1,14 @@
-from celery.result import AsyncResult
+import logging
+
+from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .tasks import health_check_task
+
+logger = logging.getLogger(settings.ENV)
 
 
 class HealthCheckView(APIView):
@@ -26,13 +30,21 @@ class CeleryHealthCheckView(APIView):
 			# Create a test task
 			task = health_check_task.delay()
 			# Wait for the task to complete
-			result = AsyncResult(task.id)
-			result.get(timeout=5)  # Wait up to 5 seconds
-			return Response(
-				{'status': 'healthy', 'message': 'AGENT SERVICE: Celery is working'},
-				status=status.HTTP_200_OK,
-			)
+			print('AGENT: Waiting for Celery task to complete...')
+			# result = AsyncResult(task.id)
+			result = task.get(timeout=5)  # Wait up to 5 seconds
+			if result:
+				return Response(
+					{'status': 'healthy', 'message': 'AGENT SERVICE: Celery is working'},
+					status=status.HTTP_200_OK,
+				)
+			else:
+				return Response(
+					{'status': 'unhealthy', 'message': 'AGENT SERVICE: Celery task did not return True'},
+					status=status.HTTP_503_SERVICE_UNAVAILABLE,
+				)
 		except Exception as e:
+			logger.error(f'AGENT SERVICE: Celery health check failed: {str(e)}', exc_info=True)
 			return Response(
 				{'status': 'unhealthy', 'error': str(e)},
 				status=status.HTTP_503_SERVICE_UNAVAILABLE,
