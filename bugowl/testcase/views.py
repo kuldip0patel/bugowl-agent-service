@@ -15,8 +15,9 @@ class ExecuteJob(APIView):
 		user = request.user
 		try:
 			self.validate_job(data.get('job'))
-			self.validate_test_suite(data.get('test_suite'))
-			self.validate_test_case(data.get('test_case'))
+			self.validate_case_suite(data.get('test_case'), data.get('test_suite'))
+			# self.validate_test_suite(data.get('test_suite'))
+			# self.validate_test_case(data.get('test_case'))
 			self.validate_environment(data.get('environment'))
 			self.validate_test_data(data.get('test_data'))
 		except ValidationError as e:
@@ -38,15 +39,19 @@ class ExecuteJob(APIView):
 		# Add specific validation for job fields here
 		# Example: if 'job_field_styles' not in job: raise ValidationError("Missing 'job_field_styles'.")
 
-	def validate_test_suite(self, test_suite):
-		if test_suite is None:
-			raise ValidationError("Missing 'test_suite' field.")
-		# Add specific validation for test_suite fields here
+	def validate_case_suite(self, case, suite):
+		if not (suite or case):
+			raise ValidationError("Missing 'test_suite' and 'test_case' field.")
 
-	def validate_test_case(self, test_case):
-		if not test_case:
-			raise ValidationError("Missing 'test_case' field.")
-		# Add specific validation for test_case fields here
+	# def validate_test_suite(self, test_suite):
+	# 	if not test_suite:
+	# 		raise ValidationError("Missing 'test_suite' field.")
+	# 	# Add specific validation for test_suite fields here
+
+	# def validate_test_case(self, test_case):
+	# 	if not test_case:
+	# 		raise ValidationError("Missing 'test_case' field.")
+	# Add specific validation for test_case fields here
 
 	def validate_environment(self, environment):
 		if not isinstance(environment, dict):

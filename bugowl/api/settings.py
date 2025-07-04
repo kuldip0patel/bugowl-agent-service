@@ -344,17 +344,15 @@ LOGGING = {
 
 
 BROKER_TRANSPORT = 'redis'
-BROKER_URL = os.getenv('BROKER_URL', 'redis://redis:6381/0')
+BROKER_URL = os.getenv('BROKER_URL', 'redis://redis-agent:6381/0')
 
-BROKER_TRANSPORT = 'redis'
-ELASTICACHE_HOST = os.getenv('ELASTICACHE_HOST') if 'ELASTICACHE_HOST' in os.environ else 'redis'
+ELASTICACHE_HOST = os.getenv('ELASTICACHE_HOST', 'redis-agent')
 
-BROKER_URL = os.getenv('BROKER_URL') if 'BROKER_URL' in os.environ else 'redis://redis:6381/0'
 
 CELERY_BROKER_URL = BROKER_URL
 CELERY_RESULT_BACKEND = BROKER_URL
-DJANGO_CACHE_LOCATION = os.getenv('DJANGO_CACHE_LOCATION') if 'DJANGO_CACHE_LOCATION' in os.environ else 'redis://redis:6381/1'
-REDIS_AUTH_TOKEN = os.getenv('REDIS_AUTH_TOKEN') if 'REDIS_AUTH_TOKEN' in os.environ else ''
+DJANGO_CACHE_LOCATION = os.getenv('DJANGO_CACHE_LOCATION', 'redis://redis-agent:6381/1')
+REDIS_AUTH_TOKEN = ''
 
 # Have to do this because /agent/sys/bop gets redirected to /sys/bop otherwise. nginx sends /agent/sys/bop to the api server but django redirects after login to /sys/bop
 USE_X_FORWARDED_HOST = True
