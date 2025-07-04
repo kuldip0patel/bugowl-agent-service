@@ -68,7 +68,7 @@ def validate_job_payload(data):
 
 	def validate_test_data(test_data):
 		if not test_data:
-			raise ValidationError("Missing 'test_data' field.")
+			return
 		if not isinstance(test_data, dict):
 			raise ValidationError("'test_data' must be a dictionary mapping test data names to data values.")
 		for test_data_name, data_value in test_data.items():
