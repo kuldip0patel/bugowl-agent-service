@@ -7,7 +7,7 @@ class JobSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Job
 		fields = [
-			'uuid',
+			'job_uuid',
 			'test_case_uuid',
 			'test_suite_uuid',
 			'environment',
