@@ -9,6 +9,7 @@ class TestCaseRunAdmin(admin.ModelAdmin):
 	list_display = (
 		'job_uuid',
 		'uuid',
+		'test_case_uuid',
 		'environment',
 		'base_url',
 		'status',
