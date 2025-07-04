@@ -9,6 +9,7 @@ from django.db import models
 class TestCaseRun(models.Model):
 	job_uuid = models.UUIDField()  # comes from main API
 	uuid = models.UUIDField(unique=True, default=uuid.uuid4)
+	test_case_uuid = models.UUIDField()  # comes from main API
 	environment = models.JSONField()  # plain text 50 chars #comes from main API
 	base_url = models.URLField(max_length=255)  # comes from main API
 	status = models.CharField(max_length=20, choices=JobStatusEnum.choices())  # Will be updated by background worker/user
