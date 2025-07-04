@@ -8,7 +8,7 @@ from django.db import models
 
 class Job(models.Model):
 	JOB_TYPE_CHOICES = [('TestCase', 'TestCase'), ('TestSuite', 'TestSuite')]
-	uuid = models.UUIDField(unique=True, default=uuid.uuid4)
+	job_uuid = models.UUIDField(unique=True, default=uuid.uuid4)  # comes from main API
 	test_case_uuid = models.UUIDField(null=True, blank=True)  # comes from main API
 	test_suite_uuid = models.UUIDField(null=True, blank=True)  # comes from main API
 	environment = models.JSONField()  # plain text 50 chars #comes from main API

@@ -8,7 +8,7 @@ from .models import Job
 class JobAdmin(admin.ModelAdmin):
 	list_display = (
 		'id',
-		'uuid',
+		'job_uuid',
 		'test_case_uuid',
 		'test_suite_uuid',
 		'environment',

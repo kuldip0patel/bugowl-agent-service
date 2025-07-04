@@ -30,7 +30,7 @@ class ExecuteJob(APIView):
 			test_case_uuid = None
 
 		job_data = {
-			'uuid': job_data['uuid'],
+			'job_uuid': job_data['uuid'],
 			'test_case_uuid': test_case_uuid,
 			'test_suite_uuid': test_suite_uuid,
 			'environment': data.get('environment'),
