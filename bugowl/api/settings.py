@@ -257,6 +257,9 @@ WHITENOISE_MIMETYPES = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Import Jazzmin configuration from separate file
+# Django automatically reads JAZZMIN_SETTINGS and JAZZMIN_UI_TWEAKS from module namespace
+from .jazzmin_config import JAZZMIN_SETTINGS, JAZZMIN_UI_TWEAKS  # noqa: F401
 
 CACHES = {
 	'default': {

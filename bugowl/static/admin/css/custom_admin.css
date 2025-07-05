@@ -1,0 +1,404 @@
+/* Custom BugOwl Admin Theme */
+:root {
+    --color-primary: #1188cc;
+    --color-secondary: #aaaa00;
+    --color-primary-dark: #0f6fa8;
+    --color-secondary-dark: #888800;
+    --color-light: #ecf0f1;
+    --color-dark: #2c3e50;
+    --color-medium: #34495e;
+}
+
+/* Brand customization */
+.brand-link {
+    background-color: var(--color-primary) !important;
+    border-bottom: 1px solid var(--color-primary-dark) !important;
+}
+
+.brand-text {
+    color: var(--color-light) !important;
+    font-weight: 600 !important;
+}
+
+/* Sidebar customization */
+.main-sidebar {
+    background-color: var(--color-dark) !important;
+}
+
+.nav-sidebar .nav-item > .nav-link {
+    color: #bdc3c7 !important;
+}
+
+.nav-sidebar .nav-item > .nav-link:hover {
+    background-color: var(--color-medium) !important;
+    color: var(--color-light) !important;
+}
+
+.nav-sidebar .nav-item > .nav-link.active {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+/* Header customization */
+.main-header {
+    background-color: var(--color-primary) !important;
+    border-bottom: 1px solid var(--color-primary-dark) !important;
+}
+
+.navbar-dark .navbar-nav .nav-link {
+    color: var(--color-light) !important;
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    color: var(--color-secondary) !important;
+}
+
+/* Content area */
+.content-wrapper {
+    background-color: var(--color-light) !important;
+}
+
+/* Cards and boxes */
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+    border: none !important;
+}
+
+.card-header {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+    border-bottom: none !important;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--color-primary) !important;
+    border-color: var(--color-primary) !important;
+}
+
+.btn-primary:hover {
+    background-color: var(--color-primary-dark) !important;
+    border-color: var(--color-primary-dark) !important;
+}
+
+.btn-success {
+    background-color: var(--color-secondary) !important;
+    border-color: var(--color-secondary) !important;
+    color: #000000 !important;
+}
+
+.btn-success:hover {
+    background-color: var(--color-secondary-dark) !important;
+    border-color: var(--color-secondary-dark) !important;
+    color: #000000 !important;
+}
+
+.btn-warning {
+    background-color: var(--color-secondary) !important;
+    border-color: var(--color-secondary) !important;
+    color: #000000 !important;
+}
+
+.btn-warning:hover {
+    background-color: var(--color-secondary-dark) !important;
+    border-color: var(--color-secondary-dark) !important;
+    color: #000000 !important;
+}
+
+.btn-danger {
+    background-color: #e74c3c !important;
+    border-color: #e74c3c !important;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b !important;
+    border-color: #c0392b !important;
+}
+
+/* Tables */
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(17, 136, 204, 0.05) !important;
+}
+
+.table th {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--color-primary-dark) !important;
+}
+
+/* Fix for Django admin table headers */
+.results table thead th {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+.results table thead th a {
+    color: #ffffff !important;
+}
+
+.results table thead th a:hover {
+    color: var(--color-secondary) !important;
+}
+
+/* Forms */
+.form-control:focus {
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 0 0.2rem rgba(17, 136, 204, 0.25) !important;
+}
+
+/* Login page customization */
+.login-page {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%) !important;
+}
+
+.login-box {
+    background-color: rgba(255, 255, 255, 0.95) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
+}
+
+.login-logo a {
+    color: var(--color-primary) !important;
+    font-weight: 600 !important;
+}
+
+/* Footer */
+.main-footer {
+    background-color: var(--color-dark) !important;
+    color: #bdc3c7 !important;
+    border-top: 1px solid var(--color-primary) !important;
+}
+
+/* Custom logo styling */
+.navbar-brand img {
+    max-height: 40px !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .brand-text {
+        display: none !important;
+    }
+}
+
+/* Animation for smooth transitions */
+.nav-link, .btn, .card {
+    transition: all 0.3s ease !important;
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: var(--color-dark);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--color-medium);
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--color-primary);
+}
+
+/* Status indicators */
+.badge-success {
+    background-color: var(--color-secondary) !important;
+    color: #000000 !important;
+}
+
+.badge-warning {
+    background-color: var(--color-secondary) !important;
+    color: #000000 !important;
+}
+
+.badge-danger {
+    background-color: #e74c3c !important;
+}
+
+.badge-info {
+    background-color: var(--color-primary) !important;
+}
+
+/* Custom spacing */
+.content-header {
+    padding: 15px 0.5rem !important;
+}
+
+.content {
+    padding: 0 0.5rem !important;
+}
+
+/* Additional theme consistency */
+.nav-pills .nav-link.active {
+    background-color: var(--color-primary) !important;
+}
+
+.nav-tabs .nav-link.active {
+    border-color: var(--color-primary) var(--color-primary) #fff !important;
+    color: var(--color-primary) !important;
+}
+
+.pagination .page-link {
+    color: var(--color-primary) !important;
+}
+
+.pagination .page-item.active .page-link {
+    background-color: var(--color-primary) !important;
+    border-color: var(--color-primary) !important;
+}
+
+/* Links */
+a {
+    color: var(--color-primary) !important;
+}
+
+a:hover {
+    color: var(--color-primary-dark) !important;
+}
+
+/* Progress bars */
+.progress-bar {
+    background-color: var(--color-primary) !important;
+}
+
+/* Alerts */
+.alert-info {
+    background-color: rgba(17, 136, 204, 0.1) !important;
+    border-color: var(--color-primary) !important;
+    color: var(--color-primary-dark) !important;
+}
+
+.alert-warning {
+    background-color: rgba(170, 170, 0, 0.1) !important;
+    border-color: var(--color-secondary) !important;
+    color: #000000 !important;
+}
+
+/* Custom admin specific elements */
+.admin-index .module h2 {
+    background-color: var(--color-primary) !important;
+}
+
+.admin-index .module table {
+    border-color: var(--color-primary) !important;
+}
+
+/* Breadcrumbs */
+.breadcrumb-item.active {
+    color: var(--color-primary) !important;
+}
+
+.breadcrumb-item a {
+    color: var(--color-primary) !important;
+}
+
+.breadcrumb-item a:hover {
+    color: var(--color-primary-dark) !important;
+}
+
+/* Additional Django admin table fixes */
+.changelist-search th,
+.changelist-search td {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+.changelist table thead th {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+.changelist table thead th a:link,
+.changelist table thead th a:visited {
+    color: #ffffff !important;
+}
+
+.changelist table thead th.sorted {
+    background-color: var(--color-primary-dark) !important;
+}
+
+.changelist table thead th.sorted a {
+    color: #ffffff !important;
+}
+
+/* Django admin form table headers */
+.module table th,
+.module table thead th {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+/* Django admin inline table headers */
+.inline-group table thead th {
+    background-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+/* Ensure all table header links are visible */
+table th a,
+table thead th a,
+.results table th a {
+    color: #ffffff !important;
+    text-decoration: none !important;
+}
+
+table th a:hover,
+table thead th a:hover,
+.results table th a:hover {
+    color: var(--color-secondary) !important;
+    text-decoration: underline !important;
+}
+
+/* Django admin specific button fixes */
+.default,
+input[type="submit"].default,
+.submit-row input.default {
+    background-color: var(--color-primary) !important;
+    border-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+.default:hover,
+input[type="submit"].default:hover,
+.submit-row input.default:hover {
+    background-color: var(--color-primary-dark) !important;
+    border-color: var(--color-primary-dark) !important;
+}
+
+/* Django admin save buttons */
+.submit-row input[type="submit"] {
+    background-color: var(--color-primary) !important;
+    border-color: var(--color-primary) !important;
+    color: #ffffff !important;
+}
+
+.submit-row input[type="submit"]:hover {
+    background-color: var(--color-primary-dark) !important;
+}
+
+/* Django admin delete buttons */
+.deletelink,
+.deletelink-box a {
+    background-color: #e74c3c !important;
+    color: #ffffff !important;
+}
+
+.deletelink:hover,
+.deletelink-box a:hover {
+    background-color: #c0392b !important;
+}
+
+/* Django admin add another buttons */
+.add-row a,
+.add-another {
+    color: var(--color-primary) !important;
+}
+
+.add-row a:hover,
+.add-another:hover {
+    color: var(--color-primary-dark) !important;
+}
