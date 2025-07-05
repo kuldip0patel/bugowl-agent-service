@@ -7,8 +7,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .helpers import execute_test_cases, save_case_task_runs, validate_job_payload
+from .helpers import save_case_task_runs, validate_job_payload
 from .serializer import JobSerializer
+from .tasks import execute_test_cases
 
 logger = logging.getLogger(settings.ENV)
 
@@ -61,7 +62,7 @@ class ExecuteJob(APIView):
 
 			logger.info('Now executing test cases')
 
-			execute_test_cases(job_instance, test_cases)
+			execute_test_cases.delay(job_instance.id, test_cases)  # type: ignore
 
 			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
 		except ValueError as ve:
