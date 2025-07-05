@@ -1,12 +1,13 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .helpers import validate_job_payload
+from .helpers import save_case_task_runs, validate_job_payload
 from .serializer import JobSerializer
 
 logger = logging.getLogger(settings.ENV)
@@ -43,13 +44,23 @@ class ExecuteJob(APIView):
 				'payload': data,
 			}
 
-			serializer = JobSerializer(data=job_data)
-			if not serializer.is_valid():
-				return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+			with transaction.atomic():
+				serializer = JobSerializer(data=job_data)
+				if not serializer.is_valid():
+					return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-			job_instance = serializer.save()
+				job_instance = serializer.save()
+				logger.info('Job created successfully with UUID: %s', job_instance.job_uuid)
+				logger.info('Now Saving TestCaseRun and TestTaskRun instances')
+
+				# Save TestCaseRun and TestTaskRun instances
+				# This function will handle the creation of TestCaseRun and TestTaskRun instances
+				save_case_task_runs(job_instance)
 
 			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
+		except ValueError as ve:
+			logger.error('Value Error for testask/case: %s', str(ve), exc_info=True)
+			return Response({'error for testask/case': str(ve)}, status=status.HTTP_400_BAD_REQUEST)
 		except Exception as e:
-			logger.error('Error creating job: %s', str(e))
+			logger.error('Error creating job: %s', str(e), exc_info=True)
 			return Response({'error': 'Failed to create job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,4 +1,11 @@
+import logging
+
+from django.conf import settings
 from rest_framework.exceptions import ValidationError
+from testask.serializers import TestTaskRunSerializer
+from testcase.serializers import TestCaseRunSerializer
+
+logger = logging.getLogger(settings.ENV)
 
 
 def validate_job_payload(data):
@@ -81,3 +88,59 @@ def validate_job_payload(data):
 	validate_case_suite(data.get('test_case'), data.get('test_suite'))
 	validate_environment(data.get('environment'))
 	validate_test_data(data.get('test_data'))
+
+
+def save_case_task_runs(job_instance):
+	# Extract payload from the job instance
+	payload = job_instance.payload
+
+	# Extract test cases from the payload
+	test_cases = payload.get('test_case', [])
+
+	for test_case in test_cases:
+		# Prepare data for TestCaseRun
+		test_case_data = {
+			'job_uuid': job_instance.job_uuid,
+			'test_case_uuid': test_case['uuid'],
+			'name': test_case['name'],
+			'priority': test_case['priority'],
+			'environment': payload.get('environment'),
+			'base_url': payload.get('environment', {}).get('url'),
+			'status': job_instance.status,
+			'browser': test_case['browser'],
+			'is_headless': False,  # Default value, can be updated as needed
+			'created_by': job_instance.created_by,
+		}
+
+		test_case_serializer = TestCaseRunSerializer(data=test_case_data)
+		if test_case_serializer.is_valid():
+			test_case_run_instance = test_case_serializer.save()
+			test_tasks = test_case.get('test_task', [])
+			for test_task in test_tasks:
+				test_data_id = test_task['test_data']
+
+				if test_data_id is not None and not isinstance(test_data_id, int):
+					raise ValueError(f"'test_data' in test_task must be an integer or null, got {test_data_id}")
+
+				test_data_obj = None
+				logger.debug(f'Fetching test data {payload.get("test_data") or []}')
+				for td in payload.get('test_data') or []:
+					if td.get('id') == test_data_id:
+						test_data_obj = td
+						break
+
+				test_task_data = {
+					'test_case_run': test_case_run_instance.id,
+					'test_task_uuid': test_task['uuid'],
+					'title': test_task['title'],
+					'status': job_instance.status,  # Initial status can be set to the job's status
+					'test_data': test_data_obj,
+				}
+
+				test_task_serializer = TestTaskRunSerializer(data=test_task_data)
+				if test_task_serializer.is_valid():
+					test_task_serializer.save()
+				else:
+					raise ValueError(f'Invalid TestTaskRun data: {test_task_serializer.errors}')
+		else:
+			raise ValueError(f'Invalid TestCaseRun data: {test_case_serializer.errors}')
