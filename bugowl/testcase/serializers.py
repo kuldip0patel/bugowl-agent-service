@@ -7,6 +7,7 @@ class TestCaseRunSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = TestCaseRun
 		fields = [
+			'job',
 			'job_uuid',
 			'uuid',
 			'test_case_uuid',

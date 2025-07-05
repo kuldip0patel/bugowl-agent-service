@@ -1,9 +1,12 @@
+import asyncio
 import logging
 
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
+
+from bugowl.agent import run_tasks
 
 logger = logging.getLogger(settings.ENV)
 
@@ -96,10 +99,11 @@ def save_case_task_runs(job_instance):
 
 	# Extract test cases from the payload
 	test_cases = payload.get('test_case', [])
-
+	test_case_run_instance_list = []
 	for test_case in test_cases:
 		# Prepare data for TestCaseRun
 		test_case_data = {
+			'job': job_instance.id,  # Link to the Job instance
 			'job_uuid': job_instance.job_uuid,
 			'test_case_uuid': test_case['uuid'],
 			'name': test_case['name'],
@@ -115,6 +119,7 @@ def save_case_task_runs(job_instance):
 		test_case_serializer = TestCaseRunSerializer(data=test_case_data)
 		if test_case_serializer.is_valid():
 			test_case_run_instance = test_case_serializer.save()
+			test_case_run_instance_list.append(test_case_run_instance)
 			test_tasks = test_case.get('test_task', [])
 			for test_task in test_tasks:
 				test_data_id = test_task['test_data']
@@ -144,3 +149,38 @@ def save_case_task_runs(job_instance):
 					raise ValueError(f'Invalid TestTaskRun data: {test_task_serializer.errors}')
 		else:
 			raise ValueError(f'Invalid TestCaseRun data: {test_case_serializer.errors}')
+
+	return test_case_run_instance_list
+
+
+def execute_test_cases(job_instance, test_case_instance_list):
+	"""
+	Execute test cases of a job
+
+	Args:
+	    test_case_instance_list (list): List of TestCaseRun instances.
+	    job_instance (Job): The job instance
+
+	Returns:
+
+	"""
+
+	for test_case_instance in test_case_instance_list:
+		# Fetch related test tasks for the test case
+		test_tasks = test_case_instance.testtaskrun_set.all()
+
+		# Extract task titles and test data dictionaries
+		test_task_titles = [task.title for task in test_tasks]
+		test_task_data_list = {
+			task.test_data.get('name'): task.test_data.get('data')
+			for task in test_tasks
+			if isinstance(task.test_data, dict) and 'name' in task.test_data and 'data' in task.test_data
+		}
+
+		logger.info(f'Executing test tasks: {test_task_titles} with data: {test_task_data_list}')
+		logger.info('calling the agent function')
+
+		try:
+			asyncio.run(run_tasks(test_task_titles, test_task_data_list))
+		except Exception as e:
+			logger.error(f'Error occurred while executing test tasks: {e}', exc_info=True)

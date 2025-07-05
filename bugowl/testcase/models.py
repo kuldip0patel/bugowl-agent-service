@@ -13,6 +13,9 @@ class TestCaseRun(models.Model):
 		('Medium', 'Medium'),
 		('Low', 'Low'),
 	]
+	job = models.ForeignKey(
+		'job.Job', on_delete=models.CASCADE
+	)  # Foreign key to the Job model, will be used to link test case runs
 	job_uuid = models.UUIDField()  # comes from main API
 	uuid = models.UUIDField(unique=True, default=uuid.uuid4)
 	test_case_uuid = models.UUIDField()  # comes from main API
@@ -41,7 +44,7 @@ class TestCaseRun(models.Model):
 	)  # User who created this test case run, will be used to fetch user details like name, email, etc.
 
 	def __str__(self):
-		return f'{self.id} - {self.name}'
+		return f'{self.id} - {self.name}'  # type: ignore
 
 
 class LLMCache(models.Model):

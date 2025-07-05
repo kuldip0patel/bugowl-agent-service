@@ -98,7 +98,7 @@ async def run_tasks(tasks: list[str], data):
 	browser_profile = BrowserProfile(
 		viewport=None,
 		keep_alive=True,
-		headless=False,
+		headless=True,
 		disable_security=False,
 		highlight_elements=False,
 		record_video_dir='videos/',

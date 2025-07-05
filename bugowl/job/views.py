@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .helpers import save_case_task_runs, validate_job_payload
+from .helpers import execute_test_cases, save_case_task_runs, validate_job_payload
 from .serializer import JobSerializer
 
 logger = logging.getLogger(settings.ENV)
@@ -55,7 +55,13 @@ class ExecuteJob(APIView):
 
 				# Save TestCaseRun and TestTaskRun instances
 				# This function will handle the creation of TestCaseRun and TestTaskRun instances
-				save_case_task_runs(job_instance)
+				test_cases = save_case_task_runs(job_instance)
+
+			logger.info('TestCaseRun and TestTaskRun instances saved successfully')
+
+			logger.info('Now executing test cases')
+
+			execute_test_cases(job_instance, test_cases)
 
 			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
 		except ValueError as ve:
