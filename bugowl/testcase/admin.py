@@ -7,6 +7,8 @@ from .models import LLMCache, TestCaseRun
 @admin.register(TestCaseRun)
 class TestCaseRunAdmin(admin.ModelAdmin):
 	list_display = (
+		'id',
+		'job',
 		'job_uuid',
 		'uuid',
 		'test_case_uuid',
