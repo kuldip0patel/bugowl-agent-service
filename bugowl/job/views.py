@@ -79,9 +79,6 @@ class JobDetailView(APIView):
 	Job detail view to fetch job details, testcaserun, testtaskrun, and teststeprun details by Job UUID.
 	"""
 
-	permission_classes = []  # No permission required for this view for testing purposes
-	authentication_classes = []  # No authentication required for this view for testing purposes
-
 	def get(self, request, *args, **kwargs):
 		try:
 			job_uuid = kwargs.get('job_uuid')
@@ -92,7 +89,7 @@ class JobDetailView(APIView):
 			job = Job.objects.get(job_uuid=job_uuid)
 
 			# Fetch all TestCaseRuns under the Job
-			test_case_runs = job.testcaserun_set.all()
+			test_case_runs = job.testcaserun_set.all()  # type: ignore
 
 			# Prepare the response structure
 			response_data = {
