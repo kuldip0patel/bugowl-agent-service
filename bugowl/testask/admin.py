@@ -9,6 +9,7 @@ class TestTaskRunAdmin(admin.ModelAdmin):
 	list_display = (
 		'test_case_run',
 		'uuid',
+		'test_task_uuid',
 		'title',
 		'status',
 		'test_data',

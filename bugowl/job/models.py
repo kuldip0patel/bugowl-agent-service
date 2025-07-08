@@ -21,3 +21,6 @@ class Job(models.Model):
 	updated_at = models.DateTimeField(auto_now=True)
 	experimental = models.BooleanField(default=False)
 	payload = models.JSONField()  # Additional data for the job
+
+	def __str__(self):
+		return f'{self.id} - {self.job_uuid}'  # type: ignore
