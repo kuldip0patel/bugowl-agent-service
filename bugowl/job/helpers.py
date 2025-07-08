@@ -189,12 +189,12 @@ def get_job_details(job_uuid):
 	if job.job_type == JobTypeEnum.TEST_CASE:
 		for test_case_run in test_case_runs:
 			# Fetch all TestTaskRuns under the TestCaseRun
-			test_task_runs = test_case_run.testtaskrun_set.all()
+			test_task_runs = test_case_run.testtaskrun_set.all()  # type: ignore[attr-defined]
 
 			test_task_data = []
 			for test_task_run in test_task_runs:
 				# Fetch all TestStepRuns under the TestTaskRun
-				test_step_runs = test_task_run.teststeprun_set.all()
+				test_step_runs = test_task_run.teststeprun_set.all()  # type: ignore[attr-defined]
 
 				test_step_data = [
 					{
@@ -298,11 +298,11 @@ def get_test_case_details(job_uuid, test_case_uuid):
 	}
 	for test_case_run in test_case_runs:
 		# Fetch all TestTaskRuns under the TestCaseRun
-		test_task_runs = test_case_run.testtaskrun_set.all()
+		test_task_runs = test_case_run.testtaskrun_set.all()  # type: ignore[attr-defined]
 		test_task_data = []
 		for test_task_run in test_task_runs:
 			# Fetch all TestStepRuns under the TestTaskRun
-			test_step_runs = test_task_run.teststeprun_set.all()
+			test_step_runs = test_task_run.teststeprun_set.all()  # type: ignore[attr-defined]
 			test_step_data = [
 				{
 					'test_case_run': test_case_run.id,

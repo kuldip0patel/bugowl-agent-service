@@ -32,7 +32,11 @@ def execute_test_cases(job_instance, test_case_instance_list):
 
 	for test_case_instance in test_case_instances:
 		# Fetch related test tasks for the test case
-		test_tasks = test_case_instance.testtaskrun_set.all()
+		test_tasks = test_case_instance.testtaskrun_set.all()  # type: ignore[attr-defined]
+
+		# If the related name is not 'testtaskrun_set', use the correct one as defined in your TestTaskRun model's ForeignKey.
+		# For example, if the related_name is 'test_tasks', use:
+		# test_tasks = test_case_instance.test_tasks.all()
 
 		# Extract task titles and test data dictionaries
 		test_task_titles = [task.title for task in test_tasks]
