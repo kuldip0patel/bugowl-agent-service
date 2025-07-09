@@ -1,5 +1,6 @@
 import logging
 
+from api.utils import Browser
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 from testask.serializers import TestTaskRunSerializer
@@ -111,7 +112,7 @@ def save_case_task_runs(job_instance):
 			'environment': payload.get('environment'),
 			'base_url': payload.get('environment', {}).get('url'),
 			'status': job_instance.status,
-			'browser': test_case['browser'],
+			'browser': test_case['browser'] if test_case['browser'] else Browser.CHROME.value,
 			'is_headless': False,  # Default value, can be updated as needed
 			'created_by': job_instance.created_by,
 		}

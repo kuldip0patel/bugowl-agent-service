@@ -71,8 +71,12 @@ ENV CODE_DIR=/app \
     DATA_DIR=/data \
     VENV_DIR=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
-    
+
 ENV PYTHONUNBUFFERED=1
+
+# Playwright environment variables to ensure browsers are found
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 
 # Add AWS Arguments and Environment Variables
 ARG AWS_ACCESS_KEY_ID
@@ -194,8 +198,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
     && ln -s "$CHROME_BINARY" /app/chromium-browser \
     && mkdir -p "/home/${BROWSERUSE_USER}/.config/chromium/Crash Reports/pending/" \
     && chown -R "$BROWSERUSE_USER:$BROWSERUSE_USER" "/home/${BROWSERUSE_USER}/.config" \
+    && chmod -R 755 "$PLAYWRIGHT_BROWSERS_PATH" \
     && ( \
         which chromium-browser && /usr/bin/chromium-browser --version \
+        && echo "Playwright browsers installed at: $PLAYWRIGHT_BROWSERS_PATH" \
+        && ls -la "$PLAYWRIGHT_BROWSERS_PATH" || echo "Browser path not found" \
+        && echo "Browser permissions:" \
+        && ls -la "$PLAYWRIGHT_BROWSERS_PATH"/*/ | head -5 || echo "Cannot list browser subdirectories" \
         && echo -e '\n\n' \
     ) | tee -a /VERSION.txt
 
@@ -242,12 +251,15 @@ RUN mkdir -p /app/logs && \
 
 
 COPY entrypoint.sh /app/
-COPY entrypoint.sh /app/
+COPY celery-entrypoint.sh /app/
+COPY verify-browsers.sh /app/
 # Convert line endings and set permissions
 RUN sed -i 's/\r$//' /app/entrypoint.sh && \
-    sed -i 's/\r$//' /app/entrypoint.sh && \
+    sed -i 's/\r$//' /app/celery-entrypoint.sh && \
+    sed -i 's/\r$//' /app/verify-browsers.sh && \
     chmod +x /app/entrypoint.sh && \
-    chmod +x /app/entrypoint.sh
+    chmod +x /app/celery-entrypoint.sh && \
+    chmod +x /app/verify-browsers.sh
 
 
 ENV PATH="/app/.venv/bin:$PATH"

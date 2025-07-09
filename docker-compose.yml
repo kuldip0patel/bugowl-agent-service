@@ -18,13 +18,18 @@ services:
     command: ["/app/entrypoint.sh"]
     env_file:
       - .env
+    environment:
+      - DISABLE_AUTO_RELOAD=false  # Set to 'true' to disable auto-reload for production
+      - PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+      - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
     volumes:
       - static_volume:/app/staticfiles
       - logs_volume:/logs
       # Mount only essential directories for development
       - ./browser_use:/app/browser_use:delegated
-      - ./bugowl:/app/bugowl:delegated
+      - ./bugowl:/app/bugowl:cached  # Use 'cached' for better file watching performance
       - ./entrypoint.sh:/app/entrypoint.sh:delegated
+      - ./verify-browsers.sh:/app/verify-browsers.sh:delegated
       - ./.env:/app/.env:delegated
     ports:
       - 8020:8020
@@ -38,14 +43,20 @@ services:
 
   celery-agent:
     build: .
-    command: bash -c "cd /app/bugowl && /app/.venv/bin/celery -A api.celery_app worker -l info"
+    entrypoint: ["/bin/bash"]
+    command: ["/app/celery-entrypoint.sh"]
     env_file:
       - .env
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+      - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
     volumes:
       - logs_volume:/logs
       # Mount only essential directories for development
       - ./browser_use:/app/browser_use:delegated
       - ./bugowl:/app/bugowl:delegated
+      - ./celery-entrypoint.sh:/app/celery-entrypoint.sh:delegated
+      - ./verify-browsers.sh:/app/verify-browsers.sh:delegated
       - ./.env:/app/.env:delegated
     links:
       - redis-agent
@@ -53,6 +64,7 @@ services:
       - redis-agent
     networks:
       - bugowl-network
+    user: root  # Run as root to avoid permission issues
 
 networks:
   bugowl-network:

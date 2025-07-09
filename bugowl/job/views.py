@@ -62,6 +62,7 @@ class ExecuteJob(APIView):
 			logger.info('TestCaseRun and TestTaskRun instances saved successfully')
 
 			logger.info('Now executing test cases')
+			logger.info('Execute testcase in celery')
 
 			execute_test_cases.delay(job_instance.id, test_cases)  # type: ignore
 
