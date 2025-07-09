@@ -51,5 +51,6 @@ def execute_test_cases(job_instance, test_case_instance_list):
 
 		try:
 			asyncio.run(run_tasks(test_task_titles, test_task_data_list))
+			logger.info('Agent function executed successfully')
 		except Exception as e:
 			logger.error(f'Error occurred while executing test tasks: {e}', exc_info=True)

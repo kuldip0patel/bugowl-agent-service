@@ -85,6 +85,28 @@ echo "PYTHON_BIN=$PYTHON_BIN"
 echo "Checking if Django is available:"
 $PYTHON_BIN -c "import django; print(f'Django version: {django.get_version()}')" || echo "Django not available"
 
+echo "Checking Playwright browser installation:"
+echo "PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-not set}"
+if [ -d "${PLAYWRIGHT_BROWSERS_PATH:-/root/.cache/ms-playwright}" ]; then
+    echo "Playwright browsers directory exists"
+    ls -la "${PLAYWRIGHT_BROWSERS_PATH:-/root/.cache/ms-playwright}" || echo "Cannot list browser directory"
+else
+    echo "WARNING: Playwright browsers directory not found at ${PLAYWRIGHT_BROWSERS_PATH:-/root/.cache/ms-playwright}"
+fi
+
+# Test if playwright can find browsers
+echo "Testing Playwright browser detection:"
+$PYTHON_BIN -c "
+try:
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser_path = p.chromium.executable_path
+        print(f'Chromium browser found at: {browser_path}')
+except Exception as e:
+    print(f'WARNING: Playwright browser test failed: {e}')
+    print('You may need to run: playwright install chromium')
+" || echo "Playwright browser test failed"
+
 echo "Contents of /app:"
 ls -la /app/
 
@@ -111,6 +133,53 @@ $PYTHON_BIN $MANAGE_PY collectstatic --no-input --clear
 echo "RUNNING manage.py create_admin_user (if command exists)"
 $PYTHON_BIN $MANAGE_PY create_admin_user
 
-echo "STARTING SERVER WITH DAPHNE"
+echo "STARTING SERVER WITH DAPHNE AND AUTO-RELOAD"
 cd /app/bugowl
-watchmedo auto-restart --patterns="*.py" --recursive -- /app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
+
+# Check if auto-reload is disabled via environment variable
+if [ "${DISABLE_AUTO_RELOAD:-false}" = "true" ]; then
+    echo "Auto-reload disabled via DISABLE_AUTO_RELOAD environment variable"
+    echo "Starting Daphne without auto-reload..."
+    exec /app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
+fi
+
+# Check if watchmedo is available
+if ! command -v watchmedo &> /dev/null; then
+    echo "ERROR: watchmedo not found. Installing watchdog..."
+    /app/.venv/bin/pip install watchdog
+
+    # Verify installation
+    if ! command -v watchmedo &> /dev/null; then
+        echo "ERROR: Failed to install watchdog. Falling back to manual Daphne start."
+        echo "Auto-reload will not be available."
+        exec /app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
+    fi
+fi
+
+echo "✓ watchmedo found: $(which watchmedo)"
+
+# Verify the watch directory exists and show its contents
+echo "Verifying watch directory..."
+if [ -d "/app/bugowl" ]; then
+    echo "✓ Watch directory /app/bugowl exists"
+    echo "Contents of /app/bugowl:"
+    ls -la /app/bugowl/ | head -10
+else
+    echo "✗ ERROR: Watch directory /app/bugowl does not exist!"
+    exit 1
+fi
+
+echo "Starting Daphne with watchmedo auto-restart..."
+echo "Watching directory: /app/bugowl"
+echo "Patterns: *.py"
+echo "Ignoring: __pycache__, *.pyc, *.pyo, .git, migrations"
+echo "Debounce interval: 1 second"
+
+# Use watchmedo to auto-restart daphne when Python files change
+exec watchmedo auto-restart \
+    --directory=/app/bugowl \
+    --patterns="*.py" \
+    --ignore-patterns="*/__pycache__/*;*.pyc;*.pyo;*/.git/*;*/migrations/*;*/.pytest_cache/*" \
+    --recursive \
+    --debounce-interval=1 \
+    -- /app/.venv/bin/daphne -b 0.0.0.0 -p 8020 api.asgi:application
