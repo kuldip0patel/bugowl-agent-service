@@ -2086,9 +2086,9 @@ class BrowserSession(BaseModel):
 							f'⚠️ Page {_log_pretty_url(page.url)} failed to finish loading after click: {type(e).__name__}: {e}'
 						)
 					await self._check_and_handle_navigation(page)
-			
+
 			# Handle navigation elements with expect_navigation
-			is_navigation_element = self._is_navigation_element(element_node)			
+			is_navigation_element = self._is_navigation_element(element_node)
 			if is_navigation_element:
 				try:
 					# Use expect_navigation to handle navigation events properly
@@ -2096,10 +2096,10 @@ class BrowserSession(BaseModel):
 						await element_handle.click(timeout=1500)
 						# Small delay to ensure click completes before navigation
 						await asyncio.sleep(0.1)
-					
+
 					# Wait for the navigation to complete
 					await navigation_info.value
-					
+
 					# Check if navigation was successful
 					await self._check_and_handle_navigation(page)
 					return None  # Success
@@ -2178,43 +2178,6 @@ class BrowserSession(BaseModel):
 			raise e
 		except Exception as e:
 			raise Exception(f'Failed to click element: {repr(element_node)}. Error: {str(e)}')
-
-	def _is_navigation_element(self, element_node: DOMElementNode) -> bool:
-		"""
-		Check if an element is likely to cause navigation when clicked.
-		"""
-		attributes = element_node.attributes or {}
-
-		# Check for href attribute (links)
-		if 'href' in attributes and attributes['href']:
-			href = attributes['href']
-			# Skip javascript: and # links
-			if not href.startswith('javascript:') and not href.startswith('#'):
-				return True
-
-		# Check for form submission elements
-		if element_node.tag_name.lower() in ['button', 'input']:
-			button_type = attributes.get('type', '').lower()
-			if button_type in ['submit']:
-				return True
-
-		# Check for onclick handlers that might cause navigation
-		if 'onclick' in attributes:
-			onclick = attributes['onclick'].lower()
-			if any(nav_keyword in onclick for nav_keyword in ['location', 'window.open', 'navigate', 'redirect']):
-				return True
-
-		# Check for data attributes that might indicate navigation
-		if any(attr.startswith('data-') and 'nav' in attr.lower() for attr in attributes.keys()):
-			return True
-
-		# Check for common navigation-related classes
-		classes = attributes.get('class', '').lower()
-		nav_classes = ['nav', 'navigation', 'menu', 'link', 'button', 'tab']
-		if any(nav_class in classes for nav_class in nav_classes):
-			return True
-
-		return False
 
 	@require_initialization
 	@time_execution_async('--get_tabs_info')
@@ -4079,30 +4042,25 @@ class BrowserSession(BaseModel):
 				/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
 				el.scrollHeight > el.clientHeight &&
 				bigEnough(el);
-	async def _scroll_container(self, pixels: int) -> None:
-		SMART_SCROLL_CENTER_JS = """
-		(dy) => {
-			const x = window.innerWidth / 2;
-			const y = window.innerHeight / 2;
-			let el = document.elementFromPoint(x, y);
 
-			function isScrollable(e) {
-				if (!e) return false;
-				const style = getComputedStyle(e);
-				return /(auto|scroll|overlay)/.test(style.overflowY) && e.scrollHeight > e.clientHeight;
-			}
+			let el = document.activeElement;
+			while (el && !canScroll(el) && el !== document.body) el = el.parentElement;
 
-			let scrollEl = el;
-			while (scrollEl && !isScrollable(scrollEl) && scrollEl !== document.body) {
-				scrollEl = scrollEl.parentElement;
-			}
+			el = canScroll(el)
+					? el
+					: [...document.querySelectorAll('*')].find(canScroll)
+					|| document.scrollingElement
+					|| document.documentElement;
 
-			if (!scrollEl || scrollEl === document.body || scrollEl === document.documentElement) {
+			if (el === document.scrollingElement ||
+				el === document.documentElement ||
+				el === document.body) {
 				window.scrollBy(0, dy);
 			} else {
-				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
+				el.scrollBy({ top: dy, behavior: 'auto' });
 			}
 		}"""
+		await page.evaluate(SMART_SCROLL_JS, pixels)
 
 		SMART_SCROLL_CENTER_JS = """
 		(dy) => {
@@ -4126,12 +4084,6 @@ class BrowserSession(BaseModel):
 			} else {
 				scrollEl.scrollBy({ top: dy, behavior: 'auto' });
 			}
-		}
-		"""
-
-		#await page.evaluate(SMART_SCROLL_JS, pixels)
-		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
-
 		}
 		"""
 		page = await self.get_current_page()
@@ -4336,7 +4288,7 @@ class BrowserSession(BaseModel):
 				document.head.appendChild(style);
 			}""",
 				str(self.id)[-4:],
-			)			
+			)
 		except Exception as e:
 			self.logger.debug(f'❌ Failed to show 📀 DVD loading animation: {type(e).__name__}: {e}')
 
@@ -4508,34 +4460,34 @@ class BrowserSession(BaseModel):
 		Check if an element is likely to cause navigation when clicked.
 		"""
 		attributes = element_node.attributes or {}
-		
+
 		# Check for href attribute (links)
 		if 'href' in attributes and attributes['href']:
 			href = attributes['href']
 			# Skip javascript: and # links
 			if not href.startswith('javascript:') and not href.startswith('#'):
 				return True
-		
+
 		# Check for form submission elements
 		if element_node.tag_name.lower() in ['button', 'input']:
 			button_type = attributes.get('type', '').lower()
 			if button_type in ['submit']:
 				return True
-		
+
 		# Check for onclick handlers that might cause navigation
 		if 'onclick' in attributes:
 			onclick = attributes['onclick'].lower()
 			if any(nav_keyword in onclick for nav_keyword in ['location', 'window.open', 'navigate', 'redirect']):
 				return True
-		
+
 		# Check for data attributes that might indicate navigation
 		if any(attr.startswith('data-') and 'nav' in attr.lower() for attr in attributes.keys()):
 			return True
-		
+
 		# Check for common navigation-related classes
 		classes = attributes.get('class', '').lower()
 		nav_classes = ['nav', 'navigation', 'menu', 'link', 'button', 'tab']
 		if any(nav_class in classes for nav_class in nav_classes):
 			return True
-		
+
 		return False
