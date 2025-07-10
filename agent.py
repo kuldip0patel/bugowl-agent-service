@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import uuid
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def read_tasks(my_file_path):
 		return tasks
 
 
-async def run_tasks(tasks: list[str], data):
+async def run_tasks(tasks: list[str]):
 	"""
 	Run multiple tasks sequentially using the Agent.
 
@@ -115,15 +116,15 @@ async def run_tasks(tasks: list[str], data):
 	print('BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....')
 
 	# Load sensitive data from environment variables
-	sensitive_data: dict[str, str | dict[str, str]] = data  # {
-	# 	key: value
-	# 	for key, value in {
-	# 		'baya_password': os.getenv('BAYA_PASSWORD'),
-	# 		'hubspot_email': os.getenv('HUBSPOT_EMAIL'),
-	# 		'hubspot_password': os.getenv('HUBSPOT_PASSWORD'),
-	# 	}.items()
-	# 	if value is not None
-	# }
+	sensitive_data: dict[str, str | dict[str, str]] = {
+		key: value
+		for key, value in {
+			'baya_password': os.getenv('BAYA_PASSWORD'),
+			'hubspot_email': os.getenv('HUBSPOT_EMAIL'),
+			'hubspot_password': os.getenv('HUBSPOT_PASSWORD'),
+		}.items()
+		if value is not None
+	}
 	print(sensitive_data)
 	print('BUGOWL: Running tasks ONE BY ONE')
 	agent = None
@@ -180,7 +181,7 @@ async def main():
 		return
 
 	print(f'Found {len(tasks)} tasks to execute')
-	# await run_tasks(tasks)
+	await run_tasks(tasks)
 
 
 if __name__ == '__main__':
