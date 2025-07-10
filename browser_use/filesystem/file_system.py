@@ -16,7 +16,7 @@ class FileSystem:
 		self.dir = self.base_dir / 'data_storage'
 		if self.dir.exists():
 			raise ValueError(
-				'File system directory already exists - stopping for safety purposes. Please delete it first if you want to use this directory.'
+				f'File system directory ({self.dir}) already exists - stopping for safety purposes. Please delete it first if you want to use this directory.'
 			)
 		self.dir.mkdir(exist_ok=True)
 

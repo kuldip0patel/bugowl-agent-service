@@ -7,10 +7,10 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .helpers import get_job_details, get_test_case_details, save_case_task_runs, validate_job_payload
+from .helpers import get_job_details, get_test_case_details, validate_job_payload
 from .models import Job
 from .serializer import JobSerializer
-from .tasks import execute_test_cases
+from .tasks import execute_job
 
 logger = logging.getLogger(settings.ENV)
 
@@ -53,18 +53,12 @@ class ExecuteJob(APIView):
 
 				job_instance = serializer.save()
 				logger.info('Job created successfully with UUID: %s', job_instance.job_uuid)
-				logger.info('Now Saving TestCaseRun and TestTaskRun instances')
 
 				# Save TestCaseRun and TestTaskRun instances
 				# This function will handle the creation of TestCaseRun and TestTaskRun instances
-				test_cases = save_case_task_runs(job_instance)
+				# test_cases = save_case_task_runs(job_instance)
 
-			logger.info('TestCaseRun and TestTaskRun instances saved successfully')
-
-			logger.info('Now executing test cases')
-			logger.info('Execute testcase in celery')
-
-			execute_test_cases.delay(job_instance.id, test_cases)  # type: ignore
+			execute_job.delay(job_instance.id)  # type: ignore
 
 			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
 		except ValueError as ve:
