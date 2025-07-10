@@ -3,7 +3,7 @@ import logging
 import uuid
 
 import coloredlogs
-from api.utils import Browser
+from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
@@ -198,7 +198,7 @@ class AgentManager:
 				'priority': test_case['priority'],
 				'environment': payload.get('environment'),
 				'base_url': payload.get('environment', {}).get('url'),
-				'status': self.job_instance.status,
+				'status': JobStatusEnum.RUNNING.value,
 				'browser': test_case['browser'] if test_case['browser'] else Browser.CHROME.value,
 				'is_headless': self.headless,
 				'created_by': self.job_instance.created_by,
@@ -220,7 +220,7 @@ class AgentManager:
 					'test_case_run': None,
 					'test_task_uuid': test_task['uuid'],
 					'title': test_task['title'],
-					'status': self.job_instance.status,  # Initial status can be set to the job's status
+					'status': JobStatusEnum.RUNNING.value,  # Initial status can be set to the job's status
 					'test_data': test_data_obj,
 				}
 				test_task_list.append(test_task_data)
@@ -246,6 +246,26 @@ class AgentManager:
 		if self.browser_session:
 			await self.browser_session.kill()
 			self.logger.info('Browser session stopped.')
+
+	async def update_testtask_run(self, status):
+		"""
+		Update the test task run status.
+		"""
+		if self.testtask_run:
+			self.testtask_run.status = (
+				status if self.testtask_run.status == JobStatusEnum.RUNNING.value else self.testtask_run.status
+			)
+			await sync_to_async(self.testtask_run.save)(update_fields=['status'])
+
+	async def update_testcase_run(self, status):
+		"""
+		Update the test case run status.
+		"""
+		if self.test_case_run:
+			self.test_case_run.status = (
+				status if self.test_case_run.status == JobStatusEnum.RUNNING.value else self.test_case_run.status
+			)
+			await sync_to_async(self.test_case_run.save)(update_fields=['status'])
 
 	async def run_test_case(self):
 		"""
@@ -279,15 +299,18 @@ class AgentManager:
 							self.logger.info(f'Test task {title} saved successfully.')
 							self.logger.info(f'Executing Task #{count}: {title}')
 							sensitive_data = (
-								{self.testtask_run.test_data.get('name'): self.testtask_run.test_data.get('data')}
-								if self.testtask_run.test_data
+								{self.testtask_run.test_data.get('name'): self.testtask_run.test_data.get('data')}  # type: ignore
+								if self.testtask_run.test_data  # type: ignore
 								else None
-							)  # type: ignore
+							)
 
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							if not history.is_successful():
 								# Handle failure (e.g., take a screenshot)
+								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
 								await save_failure_screenshot(self.browser_session, str(self.test_case_run.test_case_uuid))  # type: ignore
+							else:
+								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
 
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
@@ -295,6 +318,12 @@ class AgentManager:
 						else:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
 							return
+
+							# After all test tasks for this test case are executed, check their results
+					task_results = run_results[self.test_case_run.name]  # type: ignore
+					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
+					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
+					await self.update_testcase_run(status=final_status)
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
