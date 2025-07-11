@@ -1,7 +1,11 @@
 import asyncio
+import json
 import logging
+import os
 import uuid
+from datetime import datetime
 
+import boto3
 import coloredlogs
 from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
@@ -15,7 +19,8 @@ from browser_use.browser.session import BrowserSession
 from browser_use.utils import save_failure_screenshot
 
 from .utils import get_llm_model
-from .video_recording_streaming import VideoRecording
+
+# from .video_recording_streaming import VideoRecording
 
 
 class AgentManager:
@@ -70,15 +75,15 @@ class AgentManager:
 		Initialize the AgentManager with default or user-provided configurations.
 
 		Args:
-		    headless (bool): Whether to run the browser in headless mode.
-		    browser_type (str): Type of browser to use (e.g., "chrome").
-		    llm_model (str): The model to use for the LLM (e.g., "gpt-4o").
-		    save_conversation_path (str): Path to save conversation logs.
-		    record_video_dir (str): Directory to save recorded videos.
-		    enable_memory (bool): Whether to enable memory for the agent.
-		    use_vision (bool): Whether to enable vision for the agent.
-		    cloud_sync (str): Cloud sync configuration (default: None).
-		    use_thinking (bool): Whether to enable thinking mode for the agent.
+			headless (bool): Whether to run the browser in headless mode.
+			browser_type (str): Type of browser to use (e.g., "chrome").
+			llm_model (str): The model to use for the LLM (e.g., "gpt-4o").
+			save_conversation_path (str): Path to save conversation logs.
+			record_video_dir (str): Directory to save recorded videos.
+			enable_memory (bool): Whether to enable memory for the agent.
+			use_vision (bool): Whether to enable vision for the agent.
+			cloud_sync (str): Cloud sync configuration (default: None).
+			use_thinking (bool): Whether to enable thinking mode for the agent.
 		"""
 		self._setup_logger()
 		self.logger.info('Initializing AgentManager...')
@@ -146,7 +151,7 @@ class AgentManager:
 			args=self.get_chrome_args(),
 		)
 		self.browser_session = BrowserSession(browser_profile=browser_profile)
-		self.video_recording = VideoRecording(self)
+		# self.video_recording = VideoRecording(self)
 		self.logger.info('Browser session configured.')
 
 	async def save_testcase_run(self, test_case_run_data):
@@ -281,18 +286,26 @@ class AgentManager:
 		self.logger.info('Running test cases...')
 
 		try:
-			if not self.browser_session:
-				await self.start_browser_session()
-			self.logger.info('Browser session is ready. Starting test case execution...')
+			# if not self.browser_session:
+			# 	await self.start_browser_session()
+			# self.logger.info('Browser session is ready. Starting test case execution...')
 			run_results = {}
 			for test_case in self.test_case_list:
 				self.logger.info(f'testcase name: {test_case["name"]}')
 				test_tasks = test_case.pop('test_task')
 				result = await self.save_testcase_run(test_case)
 				if result:
+					if not self.browser_session:
+						await self.start_browser_session()
+						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
+					else:
+						await self.stop_browser_session()
+						self.logger.info('Browser session stopped. Starting new browser session for next testcase...')
+						await self.start_browser_session()
+						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
 					run_results[self.test_case_run.name] = []  # type: ignore
-					await self.video_recording.start()
+					# await self.video_recording.start()
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
 						test_task['test_case_run'] = self.test_case_run.id if self.test_case_run else None
@@ -324,11 +337,13 @@ class AgentManager:
 							return
 
 							# After all test tasks for this test case are executed, check their results
+					await self.stop_browser_session()
+					video_url = await self.upload_video_S3()
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
-					video_url = await self.video_recording.stop()
-					self.logger.info(f'Video URL: {video_url}')
+					# video_url = await self.video_recording.stop()
+					# self.logger.info(f'Video URL: {video_url}')
 					await self.update_testcase_run(status=final_status, video_url=video_url)
 
 				else:
@@ -339,7 +354,8 @@ class AgentManager:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
 			raise
 		finally:
-			await self.stop_browser_session()
+			if self.browser_session:
+				await self.stop_browser_session()
 
 	async def run_task(self, task, sensitive_data={}):
 		"""
@@ -386,55 +402,76 @@ class AgentManager:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
 			raise
 
-	# async def run_tasks(self, tasks, sensitive_data=None):
-	#     """
-	#     Run a list of tasks using the Agent.
+	async def upload_video_S3(self):
+		"""
+		Upload the Playwright video recording for the current test case to S3.
+		This should be called after the browser session is stopped.
+		"""
+		try:
+			if not self.browser_session:
+				self.logger.error('No browser session to upload video from.')
+				return None
+			page = await self.browser_session.get_current_page()
+			if not page:
+				self.logger.error('No page to upload video from.')
+				return None
+			video_path = await page.video.path()  # type: ignore
+			if not video_path or not os.path.exists(video_path):
+				self.logger.error(f'No video file found at {video_path}')
+				return None
 
-	#     Args:
-	#         tasks (list): List of tasks to execute.
-	#         sensitive_data (dict): Optional sensitive data for the tasks.
+			# Generate new filename
+			new_filename = self.get_video_filename()
+			new_video_dir = os.path.join('videos', 'browser_recordings')
+			os.makedirs(new_video_dir, exist_ok=True)
+			new_video_path = os.path.join(new_video_dir, new_filename)
 
-	#     Returns:
-	#         list: Results of the executed tasks.
-	#     """
-	#     try:
-	#         if not self.browser_session:
-	#             await self.start_browser_session()
+			# Rename/move the video file
+			os.rename(video_path, new_video_path)
+			self.logger.info(f'Renamed video from {video_path} to {new_video_path}')
 
-	#         results = []
-	#         for count, task in enumerate(tasks, start=1):
-	#             task_id = str(uuid.uuid4())
-	#             if not self.agent:
-	#                 self.agent = Agent(
-	#                     task=task,
-	#                     task_id=task_id,
-	#                     llm=self.llm,
-	#                     browser_session=self.browser_session,
-	#                     enable_memory=self.enable_memory,
-	#                     save_conversation_path=self.save_conversation_path,
-	#                     use_vision=self.use_vision,
-	#                     sensitive_data=sensitive_data,
-	#                     cloud_sync=self.cloud_sync,
-	#                     use_thinking=self.use_thinking,
-	#                 )
-	#             else:
-	#                 self.agent.add_new_task(task)
+			# Upload to S3
+			# Use the same logic as in VideoRecording.upload_to_s3
 
-	#             self.logger.info(f"Executing Task #{count}: {task}")
-	#             history = await self.agent.run()
-	#             output = "✅ SUCCESSFUL" if history.is_successful() else "❌ FAILED!"
-	#             self.logger.info(f"Task #{count} Result: {output}")
-	#             results.append({"task": task, "result": output})
+			s3_bucket = os.getenv('AWS_STORAGE_BUCKET_NAME')
+			aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+			aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+			region_name = os.getenv('AWS_S3_REGION_NAME')
+			s3_custom_domain = os.getenv('AWS_S3_CUSTOM_DOMAIN')
+			obj_params = os.getenv('AWS_S3_OBJECT_PARAMETERS')
+			s3_object_parameters = json.loads(obj_params) if obj_params else None
 
-	#             if not history.is_successful():
-	#                 # Handle failure (e.g., take a screenshot)
-	#                 from browser_use.utils import save_failure_screenshot
-	#                 await save_failure_screenshot(self.browser_session, task_id)
-	#                 break
+			session = boto3.session.Session(  # type: ignore
+				aws_access_key_id=aws_access_key_id,
+				aws_secret_access_key=aws_secret_access_key,
+				region_name=region_name,
+			)
+			s3 = session.client('s3')
+			s3_key = f'videos/browser_recordings/{new_filename}'
+			extra_args = {}
+			if s3_object_parameters:
+				extra_args.update(s3_object_parameters)
+			try:
+				s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
+				self.logger.info(f'Upload to S3 successful: {s3_key}')
+			except Exception as e:
+				self.logger.error(f'Failed to upload video to S3: {e}')
+				return None
+			if s3_custom_domain:
+				url = f'https://{s3_custom_domain}/{s3_key}'
+			else:
+				url = f'https://{s3_bucket}.s3.amazonaws.com/{s3_key}'
+			self.logger.info(f'S3 video URL: {url}')
+			return url
+		except Exception as e:
+			self.logger.error(f'Error in upload_video_S3: {e}', exc_info=True)
+			return None
 
-	#         return results
-	#     except Exception as e:
-	#         self.logger.error(f"Error executing tasks: {e}")
-	#         raise
-	#     finally:
-	#         await self.stop_browser_session()
+	def get_video_filename(self, ext='mp4'):
+		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+		uid = str(uuid.uuid4())
+		job_uuid = self.job_instance.job_uuid
+		testcase_uuid = self.test_case_run.test_case_uuid  # type: ignore
+		filename = f'{job_uuid}-{testcase_uuid}-{uid}_{timestamp}.{ext}'
+		self.logger.debug(f'Generated video filename: {filename}')
+		return filename

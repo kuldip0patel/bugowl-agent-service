@@ -10,6 +10,8 @@ import cv2
 import numpy as np
 from dotenv import load_dotenv
 
+from browser_use.browser.profile import get_display_size
+
 
 class VideoRecording:
 	def __init__(self, agent_manager, fps=10, video_dir='videos/'):
@@ -51,9 +53,25 @@ class VideoRecording:
 		return filename
 
 	async def _capture_frame(self):
-		# if self.logger:
-		#     self.logger.debug("Capturing browser frame (screenshot)...")
-		screenshot_b64 = await self.browser_session.take_screenshot(full_page=True)
+		page = await self.browser_session.get_current_page()
+		# Get the fixed display size (width, height)
+		screen_size = get_display_size() or {'width': 1920, 'height': 1080}
+		width = screen_size['width'] if isinstance(screen_size, dict) else screen_size.width
+		height = screen_size['height'] if isinstance(screen_size, dict) else screen_size.height
+		# Set the viewport to the fixed size before taking screenshot
+		try:
+			await page.set_viewport_size({'width': width, 'height': height})
+		except Exception as e:
+			if self.logger:
+				self.logger.warning(f'Failed to set viewport size: {e}')
+		screenshot = await page.screenshot(
+			full_page=False,
+			scale='css',
+			timeout=10000,
+			animations='allow',
+			caret='initial',
+		)
+		screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
 		img_bytes = base64.b64decode(screenshot_b64)
 		np_arr = np.frombuffer(img_bytes, np.uint8)
 		img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -119,15 +137,23 @@ class VideoRecording:
 			filename = self.get_video_filename()
 		self.video_path = os.path.join(self.video_dir, filename)
 		height, width, _ = self.frames[0].shape
-		fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+		fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # type: ignore
 		out = cv2.VideoWriter(self.video_path, fourcc, self.fps, (width, height))
-		for frame in self.frames:
+		for idx, frame in enumerate(self.frames):
+			if frame is None:
+				self.logger.error(f'Frame {idx} is None before writing to video!')
+				continue
+			if frame.shape[:2] != (height, width):
+				self.logger.warning(f'Resizing frame {idx} from {frame.shape} to ({height}, {width}, 3)')
+				frame = cv2.resize(frame, (width, height))
+			self.logger.debug(f'Frame {idx} shape before writing: {frame.shape}')
 			out.write(frame)
 		out.release()
 		if self.logger:
 			self.logger.info(f'Video saved locally at {self.video_path}')
 		if optimize:
-			return await self.optimize_and_upload(self.video_path)
+			return await self.upload_to_s3(self.video_path)
+			# return await self.optimize_and_upload(self.video_path)
 		else:
 			return await self.upload_to_s3(self.video_path)
 
@@ -166,7 +192,7 @@ class VideoRecording:
 	async def upload_to_s3(self, file_path):
 		if self.logger:
 			self.logger.info(f"Uploading video to S3 bucket '{self.s3_bucket}'...")
-		session = boto3.session.Session(
+		session = boto3.session.Session(  # type: ignore
 			aws_access_key_id=self.aws_access_key_id,
 			aws_secret_access_key=self.aws_secret_access_key,
 			region_name=self.region_name,
