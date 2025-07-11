@@ -80,13 +80,21 @@ def validate_job_payload(data):
 	def validate_test_data(test_data):
 		if not test_data:
 			return
-		if not isinstance(test_data, dict):
-			raise ValidationError("'test_data' must be a dictionary mapping test data names to data values.")
-		for test_data_name, data_value in test_data.items():
-			if not isinstance(test_data_name, str):
-				raise ValidationError('Test data name must be a string.')
-			if not isinstance(data_value, dict):
-				raise ValidationError(f"Value for '{test_data_name}' must be a dictionary (key-value pairs).")
+		if not isinstance(test_data, list):
+			raise ValidationError("'test_data' must be a list of test data objects.")
+		for idx, td in enumerate(test_data):
+			if not isinstance(td, dict):
+				raise ValidationError(f"Each item in 'test_data' must be a dictionary. Error at index {idx}.")
+			required_fields = ['id', 'name', 'data']
+			for field in required_fields:
+				if field not in td:
+					raise ValidationError(f"Missing '{field}' in test_data at index {idx}.")
+			if not isinstance(td['id'], int):
+				raise ValidationError(f"'id' in test_data at index {idx} must be an integer.")
+			if not isinstance(td['name'], str):
+				raise ValidationError(f"'name' in test_data at index {idx} must be a string.")
+			if not isinstance(td['data'], dict):
+				raise ValidationError(f"'data' in test_data at index {idx} must be a dictionary.")
 
 	validate_job(data.get('job'))
 	validate_case_suite(data.get('test_case'), data.get('test_suite'))

@@ -15,6 +15,7 @@ from browser_use.browser.session import BrowserSession
 from browser_use.utils import save_failure_screenshot
 
 from .utils import get_llm_model
+from .video_recording_streaming import VideoRecording
 
 
 class AgentManager:
@@ -99,7 +100,6 @@ class AgentManager:
 		self.testtask_run = None
 		self.test_case_list = None
 		self.testtask_list = None
-
 		self.logger.info('AgentManager initialized successfully.')
 
 	def get_chrome_args(self):
@@ -146,6 +146,7 @@ class AgentManager:
 			args=self.get_chrome_args(),
 		)
 		self.browser_session = BrowserSession(browser_profile=browser_profile)
+		self.video_recording = VideoRecording(self)
 		self.logger.info('Browser session configured.')
 
 	async def save_testcase_run(self, test_case_run_data):
@@ -257,7 +258,7 @@ class AgentManager:
 			)
 			await sync_to_async(self.testtask_run.save)(update_fields=['status'])
 
-	async def update_testcase_run(self, status):
+	async def update_testcase_run(self, status, video_url):
 		"""
 		Update the test case run status.
 		"""
@@ -265,7 +266,9 @@ class AgentManager:
 			self.test_case_run.status = (
 				status if self.test_case_run.status == JobStatusEnum.RUNNING.value else self.test_case_run.status
 			)
-			await sync_to_async(self.test_case_run.save)(update_fields=['status'])
+			if video_url:
+				self.test_case_run.video = video_url
+			await sync_to_async(self.test_case_run.save)(update_fields=['status', 'video'])
 
 	async def run_test_case(self):
 		"""
@@ -289,6 +292,7 @@ class AgentManager:
 				if result:
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
 					run_results[self.test_case_run.name] = []  # type: ignore
+					await self.video_recording.start()
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
 						test_task['test_case_run'] = self.test_case_run.id if self.test_case_run else None
@@ -301,7 +305,7 @@ class AgentManager:
 							sensitive_data = (
 								{self.testtask_run.test_data.get('name'): self.testtask_run.test_data.get('data')}  # type: ignore
 								if self.testtask_run.test_data  # type: ignore
-								else None
+								else {}
 							)
 
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
@@ -323,12 +327,13 @@ class AgentManager:
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
-					await self.update_testcase_run(status=final_status)
+					video_url = await self.video_recording.stop()
+					self.logger.info(f'Video URL: {video_url}')
+					await self.update_testcase_run(status=final_status, video_url=video_url)
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
 					return
-
 			return run_results
 		except Exception as e:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
@@ -336,11 +341,12 @@ class AgentManager:
 		finally:
 			await self.stop_browser_session()
 
-	async def run_task(self, task, sensitive_data=None):
+	async def run_task(self, task, sensitive_data={}):
 		"""
 		Run a single task using the Agent.
 		"""
 		if not self.agent:
+			self.logger.info(f'Sensitvie data: {sensitive_data}')
 			test_case_uuid = str(self.test_case_run.test_case_uuid)  # type: ignore
 			self.agent = Agent(
 				task=self.testtask_run.title,  # type: ignore
@@ -353,12 +359,12 @@ class AgentManager:
 				sensitive_data=sensitive_data,
 				cloud_sync=self.cloud_sync,
 				use_thinking=self.use_thinking,
-				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{test_case_uuid}/',
+				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{test_case_uuid}-{str(uuid.uuid4())}/',
 			)
 		else:
-			if sensitive_data:
+			if len(sensitive_data) > 0:
 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
-
+			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
 			self.agent.add_new_task(task)
 
 		history = await self.agent.run()
