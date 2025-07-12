@@ -151,7 +151,8 @@ async def upload_video_S3(job_instance, test_case_run, video_path, logger):
 
 		# Generate new filename
 		new_filename = get_video_filename(job_instance.job_uuid, test_case_run.test_case_uuid)  # type: ignore
-		new_video_dir = os.path.join('videos', 'browser_recordings')
+		business_id = str(job_instance.business)
+		new_video_dir = os.path.join('videos', 'browser_recordings', business_id)
 		os.makedirs(new_video_dir, exist_ok=True)
 		new_video_path = os.path.join(new_video_dir, new_filename)
 
@@ -170,7 +171,7 @@ async def upload_video_S3(job_instance, test_case_run, video_path, logger):
 			region_name=region_name,
 		)
 		s3 = session.client('s3')
-		s3_key = f'videos/browser_recordings/{new_filename}'
+		s3_key = f'videos/browser_recordings/{business_id}/{new_filename}'
 		extra_args = {}
 		if s3_object_parameters:
 			extra_args.update(s3_object_parameters)
