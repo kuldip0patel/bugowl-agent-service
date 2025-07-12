@@ -244,7 +244,7 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, test_case_u
 		if s3_object_parameters:
 			extra_args.update(s3_object_parameters)
 		try:
-			if 'LOCAL' == settings.ENV.upper():
+			if 'LOCAL' != settings.ENV.upper():
 				s3.upload_file(filename, s3_bucket, s3_key, ExtraArgs=extra_args)
 				logger.info(f'Failure screenshot uploaded to S3: {s3_key}')
 			else:
@@ -254,7 +254,7 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, test_case_u
 			return None
 		# Delete the local screenshot file after successful upload
 		try:
-			if 'LOCAL' == settings.ENV.upper():
+			if 'LOCAL' != settings.ENV.upper():
 				os.remove(filename)
 				logger.info(f'Deleted local screenshot file: {filename}')
 			else:

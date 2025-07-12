@@ -12,6 +12,7 @@ class TestTaskRunSerializer(serializers.ModelSerializer):
 			'test_task_uuid',
 			'title',
 			'status',
+			'failure_screenshot',
 			'test_data',
 			'created_at',
 			'updated_at',

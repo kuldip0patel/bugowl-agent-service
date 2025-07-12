@@ -347,6 +347,7 @@ class AgentManager:
 
 						else:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
+							await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 							return
 
 					# After all test tasks for this test case are executed, check their results
@@ -354,7 +355,7 @@ class AgentManager:
 					video_url = await upload_video_S3(
 						self.job_instance,
 						self.test_case_run,
-						self.page.video.path() if self.page else None,  # type: ignore
+						await self.page.video.path() if self.page else None,  # type: ignore
 						self.logger,
 					)
 					task_results = run_results[self.test_case_run.name]  # type: ignore
@@ -364,10 +365,12 @@ class AgentManager:
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
+					await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 					return
 			return run_results
 		except Exception as e:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
+			await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 			raise
 		finally:
 			if self.browser_session:

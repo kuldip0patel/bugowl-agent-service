@@ -17,7 +17,6 @@ class TestCaseRunSerializer(serializers.ModelSerializer):
 			'base_url',
 			'status',
 			'video',
-			'failure_screenshot',
 			'llm',
 			'browser',
 			'browser_session',
