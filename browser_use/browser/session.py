@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import base64
 import json
 import logging
 import os
@@ -16,15 +15,20 @@ from pathlib import Path
 from typing import Any, Self
 from urllib.parse import urlparse
 
+import anyio
+from typing_extensions import deprecated
+
 from browser_use.config import CONFIG
+from browser_use.observability import observe_debug
 from browser_use.utils import _log_pretty_path, _log_pretty_url
 
 from .utils import normalize_url
 
 os.environ['PW_TEST_SCREENSHOT_NO_FONTS_READY'] = '1'  # https://github.com/microsoft/playwright/issues/35972
 
-import anyio
 import psutil
+from bubus.helpers import retry
+from playwright._impl._api_structures import ViewportSize
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, InstanceOf, PrivateAttr, model_validator
 from uuid_extensions import uuid7str
 
@@ -43,13 +47,20 @@ from browser_use.browser.types import (
 from browser_use.browser.views import (
 	BrowserError,
 	BrowserStateSummary,
+	PageInfo,
 	TabInfo,
 	URLNotAllowedError,
 )
 from browser_use.dom.clickable_element_processor.service import ClickableElementProcessor
 from browser_use.dom.service import DomService
 from browser_use.dom.views import DOMElementNode, SelectorMap
-from browser_use.utils import match_url_with_domain_pattern, merge_dicts, time_execution_async, time_execution_sync
+from browser_use.utils import (
+	is_new_tab_page,
+	match_url_with_domain_pattern,
+	merge_dicts,
+	time_execution_async,
+	time_execution_sync,
+)
 
 _GLOB_WARNING_SHOWN = False  # used inside _is_url_allowed to avoid spamming the logs with the same warning multiple times
 
@@ -57,6 +68,9 @@ GLOBAL_PLAYWRIGHT_API_OBJECT = None  # never instantiate the playwright API obje
 GLOBAL_PATCHRIGHT_API_OBJECT = None  # never instantiate the patchright API object more than once per thread
 GLOBAL_PLAYWRIGHT_EVENT_LOOP = None  # track which event loop the global objects belong to
 GLOBAL_PATCHRIGHT_EVENT_LOOP = None  # track which event loop the global objects belong to
+
+MAX_SCREENSHOT_HEIGHT = 2000
+MAX_SCREENSHOT_WIDTH = 1920
 
 
 def _log_glob_warning(domain: str, glob: str, logger: logging.Logger):
@@ -71,47 +85,105 @@ def _log_glob_warning(domain: str, glob: str, logger: logging.Logger):
 		_GLOB_WARNING_SHOWN = True
 
 
-def require_initialization(func):
-	"""decorator for BrowserSession methods to require the BrowserSession be already active"""
+def require_healthy_browser(usable_page=True, reopen_page=True):
+	"""Decorator for BrowserSession methods to ensure browser/page is healthy before execution.
 
-	assert asyncio.iscoroutinefunction(func), '@require_initialization only supports decorating async methods on BrowserSession'
+	This ridiculous overengineered logic is necessary to work around playwright's completely broken handling of crashed pages.
+	- When a page is loading, playwright calls will hang indefinitely.
+	- When a page is blocked by a JS while(true){}, playwright calls will hang indefinitely.
+	- When a page is unresponsive because the system is out of CPU or Memory, playwright calls will hang indefinitely.
+	asyncio.wait(...) is the most extreme method available to try and terminate asyncio tasks in python, but even this does not work
+	because it's likely the underlying playwright node.js process that's crashing and synchronously blocking the python side.
+	This is why we must use CDP directly and skip playwright eventually.
 
-	@wraps(func)
-	async def wrapper(self, *args, **kwargs):
-		try:
-			if not self.initialized or not self.browser_context:
-				# raise RuntimeError('BrowserSession(...).start() must be called first to launch or connect to the browser')
-				await self.start()  # just start it automatically if not already started
+	Args:
+		usable_page: If True, check that the agent_current_page is valid and responsive before executing the method, if invalid log it but continue anyway
+		reopen_page: If True, attempt to reopen the page if it's crashed, invalid, or unresponsive (only applies if usable_page=True)
+	"""
 
-			if not self.agent_current_page or self.agent_current_page.is_closed():
-				self.agent_current_page = (
-					self.browser_context.pages[0] if (self.browser_context and len(self.browser_context.pages) > 0) else None
-				)
+	def decorator(func):
+		assert asyncio.iscoroutinefunction(func), '@require_healthy_browser only supports async methods'
 
-			if not self.agent_current_page or self.agent_current_page.is_closed():
-				await self.create_new_tab()
+		@wraps(func)
+		async def wrapper(self: BrowserSession, *args, **kwargs):
+			try:
+				if not self.initialized or not self.browser_context:
+					# raise RuntimeError('BrowserSession(...).start() must be called first to launch or connect to the browser')
+					await self.start()  # just start it automatically if not already started
 
-			assert self.agent_current_page and not self.agent_current_page.is_closed()
+				if not self.agent_current_page or self.agent_current_page.is_closed():
+					self.agent_current_page = (
+						self.browser_context.pages[0] if (self.browser_context and len(self.browser_context.pages) > 0) else None
+					)
 
-			if not hasattr(self, '_cached_browser_state_summary'):
-				raise RuntimeError('BrowserSession(...).start() must be called first to initialize the browser session')
+				# always require at least one tab to be open for the context to be considered usable, dont check responsiveness unless usable_page=True
+				if not self.agent_current_page or self.agent_current_page.is_closed():
+					# Create new page directly to avoid circular dependency
+					assert self.browser_context is not None, 'Browser context is not set'
+					new_page = await self.browser_context.new_page()
+					self.agent_current_page = new_page
+					if (not self.human_current_page) or self.human_current_page.is_closed():
+						self.human_current_page = new_page
+					if self.browser_profile.viewport:
+						await new_page.set_viewport_size(self.browser_profile.viewport)
 
-			return await func(self, *args, **kwargs)
+				assert self.agent_current_page and not self.agent_current_page.is_closed()
 
-		except Exception as e:
-			# Check if this is a TargetClosedError or similar connection error
-			if 'TargetClosedError' in str(type(e)) or 'context or browser has been closed' in str(e):
-				self.logger.warning(
-					f'✂️ Browser {self._connection_str} disconnected before BrowserSession.{func.__name__} could run...'
-				)
-				self._reset_connection_state()
-				# Re-raise the error so the caller can handle it appropriately
+				if not hasattr(self, '_cached_browser_state_summary'):
+					raise RuntimeError('BrowserSession(...).start() must be called first to initialize the browser session')
+
+				# Check page responsiveness if usable_page=True
+				if usable_page:
+					# Skip if already in recovery to prevent infinite recursion
+					if hasattr(self, '_in_recovery') and self._in_recovery:
+						# self.logger.debug('Already in recovery, skipping responsiveness check')
+						return await func(self, *args, **kwargs)
+
+					# Skip responsiveness check for about:blank pages - they're always responsive (I hope, otherwise something is very wrong)
+					if self.agent_current_page and is_new_tab_page(self.agent_current_page.url):
+						# self.logger.debug('Skipping responsiveness check for about:blank page')
+						return await func(self, *args, **kwargs)
+
+					# Check if page is responsive
+					# self.logger.debug(f'Checking page responsiveness for {func.__name__}...')
+					if await self._is_page_responsive(self.agent_current_page):
+						# self.logger.debug('✅ Confirmed page is responsive')
+						pass
+					else:
+						# Page is unresponsive - handle recovery
+						if not reopen_page:
+							self.logger.warning(
+								'⚠️ Page unresponsive but @require_healthy_browser(reopen_page=False), attempting to continue anyway...'
+							)
+						else:
+							try:
+								await self._recover_unresponsive_page(
+									func.__name__, timeout_ms=int(self.browser_profile.default_navigation_timeout or 5000) + 5_000
+								)
+								self.logger.debug(
+									f'🤕 Crashed page recovery finished, attempting to continue with {func.__name__}() on {_log_pretty_url(self.agent_current_page.url)}...'
+								)
+							except Exception as e:
+								self.logger.warning(
+									f'❌ Crashed page recovery failed, could not run {func.__name__}(), page is stuck unresponsive on {_log_pretty_url(self.agent_current_page.url)}...'
+								)
+								raise  # Re-raise to let retry decorator / callsite handle it
+
+				return await func(self, *args, **kwargs)
+
+			except Exception as e:
+				# Check if this is a TargetClosedError or similar connection error
+				if 'TargetClosedError' in str(type(e)) or 'browser has been closed' in str(e):
+					self.logger.warning(
+						f'✂️ Browser {self._connection_str} disconnected before BrowserSession.{func.__name__}() could run... (error: {type(e).__name__}: {e})'
+					)
+					self._reset_connection_state()
+				# Re-raise all hard errors so the caller can handle them appropriately
 				raise
-			else:
-				# Re-raise other exceptions unchanged
-				raise
 
-	return wrapper
+		return wrapper
+
+	return decorator
 
 
 DEFAULT_BROWSER_PROFILE = BrowserProfile()
@@ -211,10 +283,13 @@ class BrowserSession(BaseModel):
 
 	_cached_browser_state_summary: BrowserStateSummary | None = PrivateAttr(default=None)
 	_cached_clickable_element_hashes: CachedClickableElementHashes | None = PrivateAttr(default=None)
-	_start_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
 	_tab_visibility_callback: Any = PrivateAttr(default=None)
 	_logger: logging.Logger | None = PrivateAttr(default=None)
 	_downloaded_files: list[str] = PrivateAttr(default_factory=list)
+	_original_browser_session: Any = PrivateAttr(default=None)  # Reference to prevent GC of the original session when copied
+	_owns_browser_resources: bool = PrivateAttr(default=True)  # True if this instance owns and should clean up browser resources
+	_auto_download_pdfs: bool = PrivateAttr(default=True)  # Auto-download PDFs when detected
+	_subprocess: Any = PrivateAttr(default=None)  # Chrome subprocess reference for error handling
 
 	@model_validator(mode='after')
 	def apply_session_overrides_to_profile(self) -> Self:
@@ -238,19 +313,27 @@ class BrowserSession(BaseModel):
 	@property
 	def logger(self) -> logging.Logger:
 		"""Get instance-specific logger with session ID in the name"""
-		if self._logger is None:
-			# Create a child logger with the session ID
-			self._logger = logging.getLogger(
-				f'browser_use.BrowserSession🆂 {self.id[-4:]}.{str(id(self.agent_current_page))[-2:]}'
-			)
+		if (
+			self._logger is None or self.browser_context is None
+		):  # keep updating the name pre-init because our id and str(self) can change
+			self._logger = logging.getLogger(f'browser_use.{self}')
 		return self._logger
 
 	def __repr__(self) -> str:
-		return f'BrowserSession🆂 {self.id[-4:]}(profile={self.browser_profile}, {self._connection_str}) ref#={str(id(self))[-2:]}'
+		is_copy = '©' if self._original_browser_session else '#'
+		port_number_or_pid = (
+			(self.cdp_url or self.wss_url or str(self.browser_pid) or 'playwright').rsplit(':', 1)[-1].split('/', 1)[0]
+		)
+		return f'BrowserSession🆂 {self.id[-4:]}:{port_number_or_pid} {is_copy}{str(id(self))[-2:]} ({self._connection_str}, profile={self.browser_profile})'
 
 	def __str__(self) -> str:
-		return f'BrowserSession🆂 {self.id[-4:]}.{str(id(self.agent_current_page))[-2:]}'
+		is_copy = '©' if self._original_browser_session else '#'
+		port_number_or_pid = (
+			(self.cdp_url or self.wss_url or str(self.browser_pid) or 'playwright').rsplit(':', 1)[-1].split('/', 1)[0]
+		)
+		return f'BrowserSession🆂 {self.id[-4:]}:{port_number_or_pid} {is_copy}{str(id(self))[-2:]}'  # ' 🅟 {str(id(self.agent_current_page))[-2:]}'
 
+	# better to force people to get it from the right object, "only one way to do it" is better python
 	# def __getattr__(self, key: str) -> Any:
 	# 	"""
 	# 	fall back to getting any attrs from the underlying self.browser_profile when not defined on self.
@@ -259,6 +342,7 @@ class BrowserSession(BaseModel):
 	# 	"""
 	# 	return getattr(self.browser_profile, key)
 
+	@observe_debug(name='browser.session.start')
 	async def start(self) -> Self:
 		"""
 		Starts the browser session by either connecting to an existing browser or launching a new one.
@@ -276,54 +360,41 @@ class BrowserSession(BaseModel):
 
 		# Use timeout to prevent indefinite waiting on lock acquisition
 
-		async with asyncio.timeout(60):  # 60 second overall timeout for entire launching process to avoid deadlocks
-			async with self._start_lock:  # prevent parallel calls to start() / stop() / save_storage_state() from clashing
-				if self.initialized:
-					if await self.is_connected():
-						return self
-					else:
-						next_step = (
-							'attempting to re-connect'
-							if self.cdp_url or self.wss_url or self.browser_pid
-							else 'launching a new browser'
-						)
-						self.logger.warning(f'💔 Browser {self._connection_str} has gone away, {next_step}...')
-						# only reset connection state if we expected to be already connected but we're not
-						# avoid calling this on *first* start() as it just immediately clears many
-						# of the params passed in to BrowserSession(...) init, which the .setup_...() methods below expect
-						self._reset_connection_state()
+		# Quick return if already connected
+		if self.initialized and await self.is_connected():
+			return self
 
-				self.initialized = True  # set this first to ensure two parallel calls to start() don't clash with each other
+		# Reset if we were initialized but lost connection
+		if self.initialized:
+			self.logger.warning(f'💔 Browser {self._connection_str} has gone away, attempting to reconnect...')
+			self._reset_connection_state()
 
-				try:
-					# apply last-minute runtime-computed options to the the browser_profile, validate profile, set up folders on disk
-					assert isinstance(self.browser_profile, BrowserProfile)
-					self.browser_profile.detect_display_configuration()  # adjusts config values, must come before launch/connect
-					self.prepare_user_data_dir()  # create/unlock the <user_data_dir>/SingletonLock
+		try:
+			# Setup
+			self.browser_profile.detect_display_configuration()
+			# Note: prepare_user_data_dir() is called later in _unsafe_setup_new_browser_context()
+			# after the temp directory is created. Calling it here is premature.
 
-					# launch/connect to the browser:
-					# setup playwright library client, Browser, and BrowserContext objects
-					await self.setup_playwright()
-					await self.setup_browser_via_passed_objects()
-					await self.setup_browser_via_browser_pid()
-					await self.setup_browser_via_wss_url()
-					await self.setup_browser_via_cdp_url()
-					await (
-						self.setup_new_browser_context()
-					)  # creates a new context in existing browser or launches a new persistent context
-					assert self.browser_context, f'Failed to connect to or create a new BrowserContext for browser={self.browser}'
+			# Get playwright object (has its own retry/semaphore)
+			await self.setup_playwright()
 
-					# resize the existing pages and set up foreground tab detection
-					await self._setup_viewports()
-					await self._setup_current_page_change_listeners()
-					await self._start_context_tracing()
-				except BaseException:
-					self.initialized = False
-					raise
+			# Try to connect/launch browser (each has appropriate retry logic)
+			await self._connect_or_launch_browser()
 
-		# self.logger.debug(f'🎭 started successfully')
+			# Ensure we have a context
+			assert self.browser_context, f'Failed to create BrowserContext for browser={self.browser}'
 
-		return self
+			# Configure browser
+			await self._setup_viewports()
+			await self._setup_current_page_change_listeners()
+			await self._start_context_tracing()
+
+			self.initialized = True
+			return self
+
+		except BaseException:
+			self.initialized = False
+			raise
 
 	@property
 	def _connection_str(self) -> str:
@@ -346,125 +417,93 @@ class BrowserSession(BaseModel):
 			else f'browser={driver_name}:{binary_name}'
 		)
 
-	async def stop(self) -> None:
+	async def stop(self, _hint: str = '') -> None:
 		"""Shuts down the BrowserSession, killing the browser process (only works if keep_alive=False)"""
 
-		# trying to launch/kill browsers at the same time is an easy way to trash an entire user_data_dir
-		# it's worth the 1s or 2s of delay in the worst case to avoid race conditions, user_data_dir can be a few GBs
-		# Use timeout to prevent indefinite waiting on lock acquisition
-		async with asyncio.timeout(30):  # 30 second timeout for stop operations
-			async with self._start_lock:
-				# save cookies to disk if cookies_file or storage_state is configured
-				# but only if the browser context is still connected
-				if self.browser_context:
-					try:
-						await asyncio.wait_for(self.save_storage_state(), timeout=5)
-					except Exception as e:
-						self.logger.warning(f'⚠️ Failed to save auth storage state before stopping: {type(e).__name__}: {e}')
+		# Save cookies to disk if configured
+		if self.browser_context:
+			try:
+				await self.save_storage_state()
+			except Exception as e:
+				self.logger.warning(f'⚠️ Failed to save auth storage state before stopping: {type(e).__name__}: {e}')
 
-				if self.browser_profile.keep_alive:
-					self.logger.info(
-						'🕊️ BrowserSession.stop() called but keep_alive=True, leaving the browser running. Use .kill() to force close.'
-					)
-					return  # nothing to do if keep_alive=True, leave the browser running
+		if self.browser_profile.keep_alive:
+			self.logger.info(
+				'🕊️ BrowserSession.stop() called but keep_alive=True, leaving the browser running. Use .kill() to force close.'
+			)
+			return  # nothing to do if keep_alive=True, leave the browser running
 
-				if self.browser_context or self.browser:
-					self.logger.info(f'🛑 Closing {self._connection_str} browser context {self.browser_context or self.browser}')
+		# Only the owner can actually stop the browser
+		if not self._owns_browser_resources:
+			self.logger.debug(f'🔗 BrowserSession.stop() called on a copy, not closing shared browser resources {_hint}')
+			# Still reset our references though
+			self._reset_connection_state()
+			return
 
-					# Stop trace recording before closing context
-					if self.browser_profile.traces_dir and self.browser_context is not None:
-						try:
-							traces_path = Path(self.browser_profile.traces_dir)
-							if traces_path.suffix:
-								# Path has extension, use as-is (user specified exact file path)
-								final_trace_path = traces_path
-							else:
-								# Path has no extension, treat as directory and create filename
-								trace_filename = f'BrowserSession_{self.id}.zip'
-								final_trace_path = traces_path / trace_filename
+		if self.browser_context or self.browser:
+			self.logger.info(f'🛑 Closing {self._connection_str} browser context {_hint} {self.browser or self.browser_context}')
 
-							self.logger.info(f'🎥 Saving browser context trace to {final_trace_path}...')
-							async with asyncio.timeout(30):
-								await self.browser_context.tracing.stop(path=str(final_trace_path))
-						except Exception as e:
-							# TargetClosedError is expected when browser has already been closed - don't log as error
-							from browser_use.browser.types import TargetClosedError
+			# Save trace recording if configured
+			if self.browser_profile.traces_dir and self.browser_context:
+				try:
+					await self._save_trace_recording()
+				except Exception as e:
+					# TargetClosedError is expected when browser has already been closed
+					from browser_use.browser.types import TargetClosedError
 
-							if isinstance(e, TargetClosedError):
-								self.logger.debug('Browser context already closed, trace may have been saved automatically')
-							else:
-								self.logger.error(f'❌ Error saving browser context trace: {type(e).__name__}: {e}')
+					if isinstance(e, TargetClosedError):
+						self.logger.debug('Browser context already closed, trace may have been saved automatically')
+					else:
+						self.logger.error(f'❌ Error saving browser context trace: {type(e).__name__}: {e}')
 
-					# playwright saves these on browser.close() automatically
-					if self.browser_profile.record_video_dir:
-						self.logger.info(
-							f'🎥 Saving video recording to record_video_dir= {self.browser_profile.record_video_dir}...'
-						)
-					if self.browser_profile.record_har_path:
-						self.logger.info(f'🎥 Saving HAR file to record_har_path= {self.browser_profile.record_har_path}...')
+			# Log video/HAR save operations (saved automatically on close)
+			if self.browser_profile.record_video_dir:
+				self.logger.info(f'🎥 Saving video recording to record_video_dir= {self.browser_profile.record_video_dir}...')
+			if self.browser_profile.record_har_path:
+				self.logger.info(f'🎥 Saving HAR file to record_har_path= {self.browser_profile.record_har_path}...')
 
-					try:
-						# Add timeout to prevent hanging on close if context is already closed
-						try:
-							async with asyncio.timeout(30):  # 30 second timeout for close operation
-								# IMPORTANT: Close context first to ensure HAR/video files are saved
-								if self.browser_context:
-									await self.browser_context.close()
-									self.browser_context = None  # Prevent duplicate close attempts
-								# Then close browser if we have one
-								if self.browser and self.browser.is_connected():
-									await self.browser.close()
-						except TimeoutError:
-							self.logger.warning('⏱️ Timeout while closing browser/context, has it become unresponsive?')
-					except Exception as e:
-						if 'browser has been closed' not in str(e):
-							self.logger.warning(
-								f'❌ Error closing playwright browser_context={self.browser_context}: {type(e).__name__}: {e}'
-							)
-					finally:
-						# Always clear references to ensure a fresh start next time
-						self.browser_context = None
-						self.browser = None
+			# Close browser context and browser using retry-decorated methods
+			try:
+				# IMPORTANT: Close context first to ensure HAR/video files are saved
+				await self._close_browser_context()
+				await self._close_browser()
+			except Exception as e:
+				if 'browser has been closed' not in str(e):
+					self.logger.warning(f'❌ Error closing browser: {type(e).__name__}: {e}')
+			finally:
+				# Always clear references to ensure a fresh start next time
+				self.browser_context = None
+				self.browser = None
 
-				# kill the chrome subprocess if we were the ones that started it
-				if self.browser_pid:
-					try:
-						proc = psutil.Process(pid=self.browser_pid)
-						cmdline = proc.cmdline()
-						executable_path = cmdline[0] if cmdline else 'unknown'
-						self.logger.info(f' ↳ Killing browser_pid={self.browser_pid} {_log_pretty_path(executable_path)}')
-						# Add timeout for process termination
-						try:
-							async with asyncio.timeout(5):  # 5 second timeout
-								proc.terminate()
-								self._kill_child_processes()
-								await asyncio.to_thread(proc.wait, timeout=4)
-						except (TimeoutError, psutil.TimeoutExpired):
-							self.logger.warning(
-								f'⏱️ Process did not terminate gracefully, force killing browser_pid={self.browser_pid}'
-							)
-							proc.kill()  # Force kill if terminate didn't work
-						self.browser_pid = None
-					except psutil.NoSuchProcess:
-						self.browser_pid = None
-					except Exception as e:
-						if 'NoSuchProcess' not in type(e).__name__:
-							self.logger.debug(
-								f'❌ Error terminating subprocess with browser_pid={self.browser_pid}: {type(e).__name__}: {e}'
-							)
+		# Kill the chrome subprocess if we started it
+		if self.browser_pid:
+			try:
+				await self._terminate_browser_process(_hint='(stop() called)')
+			except psutil.NoSuchProcess:
+				self.browser_pid = None
+			except (TimeoutError, psutil.TimeoutExpired):
+				# If graceful termination failed, force kill
+				try:
+					proc = psutil.Process(pid=self.browser_pid)
+					self.logger.warning(f'⏱️ Process did not terminate gracefully, force killing browser_pid={self.browser_pid}')
+					proc.kill()
+				except psutil.NoSuchProcess:
+					pass
+				self.browser_pid = None
+			except Exception as e:
+				if 'NoSuchProcess' not in type(e).__name__:
+					self.logger.debug(f'❌ Error terminating subprocess: {type(e).__name__}: {e}')
+				self.browser_pid = None
 
-				# if the user_data_dir is a temporary one, delete it
-				if self.browser_profile.user_data_dir and Path(self.browser_profile.user_data_dir).name.startswith(
-					'browseruse-tmp'
-				):
-					shutil.rmtree(self.browser_profile.user_data_dir, ignore_errors=True)
+		# Clean up temporary user data directory
+		if self.browser_profile.user_data_dir and Path(self.browser_profile.user_data_dir).name.startswith('browseruse-tmp'):
+			shutil.rmtree(self.browser_profile.user_data_dir, ignore_errors=True)
 
-				self._reset_connection_state()
-				# self.logger.debug('🛑 Shutdown complete.')
+		self._reset_connection_state()
 
 	async def close(self) -> None:
 		"""Deprecated: Provides backwards-compatibility with old method Browser().close() and playwright BrowserContext.close()"""
-		await self.stop()
+		await self.stop(_hint='(close() called)')
 
 	async def kill(self) -> None:
 		"""Stop the BrowserSession even if keep_alive=True"""
@@ -472,7 +511,7 @@ class BrowserSession(BaseModel):
 		# 	f'⏹️ Browser browser_pid={self.browser_pid} user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir) or "<incognito>"} keep_alive={self.browser_profile.keep_alive} (close() called)'
 		# )
 		self.browser_profile.keep_alive = False
-		await self.stop()
+		await self.stop(_hint='(kill() called)')
 
 		# do not stop self.playwright here as its likely used by other parallel browser_sessions
 		# let it be cleaned up by the garbage collector when no refs use it anymore
@@ -500,25 +539,55 @@ class BrowserSession(BaseModel):
 		# self.logger.debug(
 		# 	f'⏹️ Stopping gracefully browser_pid={self.browser_pid} user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir) or "<incognito>"} keep_alive={self.browser_profile.keep_alive} (context manager exit)'
 		# )
-		await self.stop()
+		await self.stop(_hint='(context manager exit)')
+
+	def model_copy(self, **kwargs) -> Self:
+		"""Create a copy of this BrowserSession that shares the browser resources but doesn't own them.
+
+		This method creates a copy that:
+		- Shares the same browser, browser_context, and playwright objects
+		- Doesn't own the browser resources (won't close them when garbage collected)
+		- Keeps a reference to the original to prevent premature garbage collection
+		"""
+		# Create the copy using the parent class method
+		copy = super().model_copy(**kwargs)
+
+		# The copy doesn't own the browser resources
+		copy._owns_browser_resources = False
+
+		# Keep a reference to the original to prevent garbage collection
+		copy._original_browser_session = self
+
+		# Manually copy over the excluded fields that are needed for browser connection
+		# These fields are excluded in the model config but need to be shared
+		copy.playwright = self.playwright
+		copy.browser = self.browser
+		copy.browser_context = self.browser_context
+		copy.agent_current_page = self.agent_current_page
+		copy.human_current_page = self.human_current_page
+		copy.browser_pid = self.browser_pid
+
+		return copy
 
 	def __del__(self):
-		# Avoid keeping references in __del__ that might prevent garbage collection
-		try:
-			profile = getattr(self, 'browser_profile', None)
-			keep_alive = getattr(profile, 'keep_alive', None)
-			user_data_dir = getattr(profile, 'user_data_dir', None)
-			if self.initialized:
-				self.logger.debug(
-					f'🛑 Stopping (garbage collected BrowserSession 🆂{self.id[-4:]}.{str(id(self.agent_current_page))[-2:]} ref #{str(id(self))[-4:]}) keep_alive={keep_alive} user_data_dir= {_log_pretty_path(user_data_dir) or "<incognito>"}'
-				)
+		profile = getattr(self, 'browser_profile', None)
+		keep_alive = getattr(profile, 'keep_alive', None)
+		user_data_dir = getattr(profile, 'user_data_dir', None)
+		owns_browser = getattr(self, '_owns_browser_resources', True)
+		status = f'🪓 killing pid={self.browser_pid}...' if (self.browser_pid and owns_browser) else '☠️'
+		self.logger.debug(
+			f'🗑️ Garbage collected BrowserSession 🆂 {self.id[-4:]}.{str(id(self.agent_current_page))[-2:]} ref #{str(id(self))[-4:]} keep_alive={keep_alive} owns_browser={owns_browser} {status}'
+		)
+		# Only kill browser processes if this instance owns them
+		if owns_browser:
+			# Avoid keeping references in __del__ that might prevent garbage collection
+			try:
+				self._kill_child_processes(_hint='(garbage collected)')
+			except TimeoutError:
+				# Never let __del__ raise Timeout exceptions
+				pass
 
-			self._kill_child_processes()
-		except BaseException:
-			# Never let __del__ raise exceptions
-			pass
-
-	def _kill_child_processes(self) -> None:
+	def _kill_child_processes(self, _hint: str = '') -> None:
 		"""Kill any child processes that might be related to the browser"""
 
 		if not self.browser_profile.keep_alive and self.browser_pid:
@@ -529,6 +598,7 @@ class BrowserSession(BaseModel):
 					browser_proc.wait(
 						timeout=5
 					)  # wait up to 5 seconds for the process to exit cleanly and commit its user_data_dir changes
+					self.logger.debug(f'🍂 Killed browser subprocess gracefully browser_pid={self.browser_pid} {_hint}')
 				except (psutil.NoSuchProcess, psutil.AccessDenied, TimeoutError):
 					pass
 
@@ -537,16 +607,18 @@ class BrowserSession(BaseModel):
 					try:
 						# self.logger.debug(f'Force killing child process: {child.pid} ({child.name()})')
 						child.kill()
+						self.logger.debug(f'☠️ Force-killed hung browser helper subprocess pid={child.pid} {_hint}')
 					except (psutil.NoSuchProcess, psutil.AccessDenied):
 						pass
 
 				# Kill the main browser process
 				# self.logger.debug(f'Force killing browser process: {self.browser_pid}')
 				browser_proc.kill()
+				self.logger.debug(f'☠️ Force-killed hung browser subprocess browser_pid={self.browser_pid} {_hint}')
 			except psutil.NoSuchProcess:
 				pass
 			except Exception as e:
-				self.logger.warning(f'Error force-killing browser in BrowserSession.__del__: {type(e).__name__}: {e}')
+				self.logger.warning(f'⚠️ Error force-killing browser in BrowserSession.__del__: {type(e).__name__}: {e}')
 
 	@staticmethod
 	async def _start_global_playwright_subprocess(is_stealth: bool) -> PlaywrightOrPatchright:
@@ -568,15 +640,10 @@ class BrowserSession(BaseModel):
 			GLOBAL_PLAYWRIGHT_EVENT_LOOP = current_loop
 			return GLOBAL_PLAYWRIGHT_API_OBJECT
 
-	async def setup_playwright(self) -> None:
-		"""
-		Set up playwright library client object: usually the result of (await async_playwright().start())
-		Override to customize the set up of the playwright or patchright library object
-		"""
-		global GLOBAL_PLAYWRIGHT_API_OBJECT  # one per thread, represents a node.js playwright subprocess that relays commands to the browser via CDP
-		global GLOBAL_PATCHRIGHT_API_OBJECT
-		global GLOBAL_PLAYWRIGHT_EVENT_LOOP  # one per thread, represents a node.js playwright subprocess that relays commands to the browser via CDP
-		global GLOBAL_PATCHRIGHT_EVENT_LOOP
+	async def _unsafe_get_or_start_playwright_object(self) -> PlaywrightOrPatchright:
+		"""Get existing or create new global playwright object with proper locking."""
+		global GLOBAL_PLAYWRIGHT_API_OBJECT, GLOBAL_PATCHRIGHT_API_OBJECT
+		global GLOBAL_PLAYWRIGHT_EVENT_LOOP, GLOBAL_PATCHRIGHT_EVENT_LOOP
 
 		# Get current event loop
 		try:
@@ -585,24 +652,12 @@ class BrowserSession(BaseModel):
 			current_loop = None
 
 		is_stealth = self.browser_profile.stealth
-
-		# Configure browser channel based on stealth mode
-		if is_stealth:
-			# use patchright + chrome when stealth=True
-			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROME
-			self.logger.info(f'🕶️ Activated stealth mode using patchright {self.browser_profile.channel.name.lower()} browser...')
-		else:
-			# use playwright + chromium by default
-			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROMIUM
-
-		# Check if we're in a different event loop than the one that created the global object
-		should_recreate = False
 		driver_name = 'patchright' if is_stealth else 'playwright'
 		global_api_object = GLOBAL_PATCHRIGHT_API_OBJECT if is_stealth else GLOBAL_PLAYWRIGHT_API_OBJECT
 		global_event_loop = GLOBAL_PATCHRIGHT_EVENT_LOOP if is_stealth else GLOBAL_PLAYWRIGHT_EVENT_LOOP
-		self.playwright = (
-			self.playwright or global_api_object or await self._start_global_playwright_subprocess(is_stealth=is_stealth)
-		)
+
+		# Check if we need to create or recreate the global object
+		should_recreate = False
 
 		if global_api_object and global_event_loop != current_loop:
 			self.logger.debug(
@@ -620,8 +675,140 @@ class BrowserSession(BaseModel):
 				self.logger.debug(f'Detected invalid {driver_name} instance: {type(e).__name__}. Creating new instance.')
 				should_recreate = True
 
-		if should_recreate:
-			self.playwright = await self._start_global_playwright_subprocess(is_stealth=is_stealth)
+		# If we already have a valid object, use it
+		if global_api_object and not should_recreate:
+			return global_api_object
+
+		# Create new playwright object
+		return await self._start_global_playwright_subprocess(is_stealth=is_stealth)
+
+	@retry(wait=1, retries=2, timeout=45, semaphore_limit=1, semaphore_scope='self', semaphore_lax=False)
+	async def _close_browser_context(self) -> None:
+		"""Close browser context with retry logic."""
+		await self._unsafe_close_browser_context()
+
+	async def _unsafe_close_browser_context(self) -> None:
+		"""Unsafe browser context close logic without retry protection."""
+		if self.browser_context:
+			await self.browser_context.close()
+			self.browser_context = None
+
+	@retry(wait=1, retries=2, timeout=10, semaphore_limit=1, semaphore_scope='self', semaphore_lax=False)
+	async def _close_browser(self) -> None:
+		"""Close browser instance with retry logic."""
+		await self._unsafe_close_browser()
+
+	async def _unsafe_close_browser(self) -> None:
+		"""Unsafe browser close logic without retry protection."""
+		if self.browser and self.browser.is_connected():
+			await self.browser.close()
+			self.browser = None
+
+	@retry(
+		wait=0.5,
+		retries=3,
+		timeout=5,
+		semaphore_limit=1,
+		semaphore_scope='self',
+		semaphore_lax=True,
+		retry_on=(TimeoutError, psutil.TimeoutExpired),  # Only retry on timeouts, not NoSuchProcess
+	)
+	async def _terminate_browser_process(self, _hint: str = '') -> None:
+		"""Terminate browser process with retry logic."""
+		await self._unsafe_terminate_browser_process(_hint='(terminate() called)')
+
+	async def _unsafe_terminate_browser_process(self, _hint: str = '') -> None:
+		"""Unsafe browser process termination without retry protection."""
+		if self.browser_pid:
+			try:
+				proc = psutil.Process(pid=self.browser_pid)
+				cmdline = proc.cmdline()
+				executable_path = cmdline[0] if cmdline else 'unknown'
+				self.logger.info(f' ↳ Killing browser_pid={self.browser_pid} {_log_pretty_path(executable_path)} {_hint}')
+
+				# Try graceful termination first
+				proc.terminate()
+				self._kill_child_processes(_hint=_hint)
+				await asyncio.to_thread(proc.wait, timeout=4)
+			except psutil.NoSuchProcess:
+				# Process already gone, that's fine
+				pass
+			finally:
+				self.browser_pid = None
+
+	@retry(wait=0.5, retries=2, timeout=30, semaphore_limit=1, semaphore_scope='self', semaphore_lax=True)
+	async def _save_trace_recording(self) -> None:
+		"""Save browser trace recording."""
+		if self.browser_profile.traces_dir and self.browser_context is not None:
+			traces_path = Path(self.browser_profile.traces_dir)
+			if traces_path.suffix:
+				# Path has extension, use as-is (user specified exact file path)
+				final_trace_path = traces_path
+			else:
+				# Path has no extension, treat as directory and create filename
+				trace_filename = f'BrowserSession_{self.id}.zip'
+				final_trace_path = traces_path / trace_filename
+
+			self.logger.info(f'🎥 Saving browser_context trace to {final_trace_path}...')
+			await self.browser_context.tracing.stop(path=str(final_trace_path))
+
+	@observe_debug(name='connect_or_launch_browser')
+	async def _connect_or_launch_browser(self) -> None:
+		"""Try all connection methods in order of precedence."""
+		# Try connecting via passed objects first
+		await self.setup_browser_via_passed_objects()
+		if self.browser_context:
+			return
+
+		# Try connecting via browser PID
+		await self.setup_browser_via_browser_pid()
+		if self.browser_context:
+			return
+
+		# Try connecting via WSS URL
+		await self.setup_browser_via_wss_url()
+		if self.browser_context:
+			return
+
+		# Try connecting via CDP URL
+		await self.setup_browser_via_cdp_url()
+		if self.browser_context:
+			return
+
+		# Launch new browser as last resort
+		await self.setup_new_browser_context()
+
+	# Removed _take_screenshot_hybrid - merged into take_screenshot
+
+	@observe_debug(name='setup_playwright')
+	@retry(
+		wait=1,
+		retries=3,
+		timeout=10,
+		semaphore_limit=1,
+		semaphore_name='playwright_global_object',
+		semaphore_scope='global',
+		semaphore_lax=False,
+		semaphore_timeout=5,  # 5s to wait for global playwright object
+	)
+	async def setup_playwright(self) -> None:
+		"""
+		Set up playwright library client object: usually the result of (await async_playwright().start())
+		Override to customize the set up of the playwright or patchright library object
+		"""
+		is_stealth = self.browser_profile.stealth
+
+		# Configure browser channel based on stealth mode
+		if is_stealth:
+			# use patchright + chrome when stealth=True
+			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROME
+			self.logger.info(f'🕶️ Activated stealth mode using patchright {self.browser_profile.channel.name.lower()} browser...')
+		else:
+			# use playwright + chromium by default
+			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROMIUM
+
+		# Get or create the global playwright object
+		self.playwright = self.playwright or await self._unsafe_get_or_start_playwright_object()
 
 		# Log stealth best-practices warnings if applicable
 		if is_stealth:
@@ -654,7 +841,15 @@ class BrowserSession(BaseModel):
 		"""Override to customize the set up of the connection to an existing browser"""
 
 		# 1. check for a passed Page object, if present, it always takes priority, set browser_context = page.context
-		self.browser_context = (self.agent_current_page and self.agent_current_page.context) or self.browser_context or None
+		if self.agent_current_page:
+			try:
+				# Test if the page is still usable by evaluating simple JS
+				await self.agent_current_page.evaluate('() => true')
+				self.browser_context = self.agent_current_page.context
+			except Exception:
+				# Page is closed or unusable, clear it
+				self.agent_current_page = None
+				self.browser_context = None
 
 		# 2. Check if the current browser connection is valid, if not clear the invalid objects
 		if self.browser_context:
@@ -695,19 +890,20 @@ class BrowserSession(BaseModel):
 		try:
 			chrome_process = psutil.Process(pid=self.browser_pid)
 			if not chrome_process.is_running():
-				self.logger.warning(f'Chrome process with pid={self.browser_pid} is not running')
+				self.logger.warning(f'⚠️ Expected Chrome process with pid={self.browser_pid} is not running')
 				return
 			args = chrome_process.cmdline()
 		except psutil.NoSuchProcess:
-			self.logger.warning(f'Chrome process with pid={self.browser_pid} not found')
+			self.logger.warning(f'⚠️ Expected Chrome process with pid={self.browser_pid} not found, unable to (re-)connect')
 			return
 		except Exception as e:
 			self.browser_pid = None
-			self.logger.warning(f'Error accessing chrome process with pid={self.browser_pid}: {type(e).__name__}: {e}')
+			self.logger.warning(f'⚠️ Error accessing chrome process with pid={self.browser_pid}: {type(e).__name__}: {e}')
 			return
 
 		# check that browser_pid process is exposing a debug port we can connect to, otherwise we cannot connect to it
 		debug_port = next((arg for arg in args if arg.startswith('--remote-debugging-port=')), '').split('=')[-1].strip()
+		# self.logger.debug(f'👾 Found Chrome subprocess browser_pid={self.browser_pid} open CDP port: --remote-debugging-port={debug_port}')
 		if not debug_port:
 			# provided pid is unusable, it's either not running or doesnt have an open debug port we can connect to
 			if '--remote-debugging-pipe' in args:
@@ -721,8 +917,92 @@ class BrowserSession(BaseModel):
 			self.browser_pid = None
 			return
 
-		self.cdp_url = self.cdp_url or f'http://localhost:{debug_port}/'
-		self.logger.info(f'🌎 Connecting to existing local browser process: browser_pid={self.browser_pid} on {self.cdp_url}')
+		self.cdp_url = self.cdp_url or f'http://127.0.0.1:{debug_port}/'
+
+		# Wait for CDP port to become available (Chrome might still be starting)
+		import httpx
+
+		# Add initial delay to give Chrome time to start up before first check
+		await asyncio.sleep(2)
+
+		async with httpx.AsyncClient() as client:
+			for i in range(30):  # 30 second timeout
+				# First check if the Chrome process has exited
+				try:
+					chrome_process = psutil.Process(pid=self.browser_pid)
+					if not chrome_process.is_running():
+						# If we have a subprocess reference, try to get stderr
+						if hasattr(self, '_subprocess') and self._subprocess:
+							stderr_output = ''
+							if self._subprocess.stderr:
+								try:
+									stderr_bytes = await self._subprocess.stderr.read()
+									stderr_output = stderr_bytes.decode('utf-8', errors='replace')
+								except Exception:
+									pass
+							if 'Failed parsing extensions' in stderr_output:
+								self.logger.error(f'❌ Chrome process {self.browser_pid} exited: Failed parsing extensions')
+								raise RuntimeError('Failed parsing extensions: Chrome profile incompatibility detected')
+							elif 'SingletonLock' in stderr_output or 'ProcessSingleton' in stderr_output:
+								# Chrome exited due to singleton lock
+								self._fallback_to_temp_profile('Chrome process exit due to SingletonLock')
+								# Kill the subprocess and retry with new profile
+								try:
+									self._subprocess.terminate()
+									await self._subprocess.wait()
+								except Exception:
+									pass
+								self.browser_pid = None
+								# Retry with the new temp directory
+								await self._unsafe_setup_new_browser_context()
+								return
+							else:
+								# Chrome exited for unknown reason, try fallback to temp profile
+								self.logger.warning(
+									f'⚠️ Chrome process {self.browser_pid} exited unexpectedly. Error: {stderr_output[:500] if stderr_output else "No error output"}'
+								)
+								self._fallback_to_temp_profile('Chrome process exit with unknown error')
+								# Kill the subprocess and retry with new profile
+								try:
+									self._subprocess.terminate()
+									await self._subprocess.wait()
+								except Exception:
+									pass
+								self.browser_pid = None
+								# Retry with the new temp directory
+								await self._unsafe_setup_new_browser_context()
+								return
+						self.logger.error(f'❌ Chrome process {self.browser_pid} exited unexpectedly')
+						self.browser_pid = None
+						return
+				except psutil.NoSuchProcess:
+					self.logger.error(f'❌ Chrome process {self.browser_pid} no longer exists')
+					self.browser_pid = None
+					return
+
+				try:
+					response = await client.get(f'{self.cdp_url}json/version', timeout=1.0)
+					if response.status_code == 200:
+						# self.logger.debug(f'✅ Chrome CDP port {debug_port} is ready')
+						break
+				except (httpx.ConnectError, httpx.TimeoutException):
+					if i == 0:
+						self.logger.debug(f'⏳ Waiting for Chrome CDP port {debug_port} to become available...')
+					await asyncio.sleep(1)
+			else:
+				self.logger.error(f'❌ Chrome CDP port {debug_port} did not become available after 30 seconds')
+				self.browser_pid = None
+				return
+
+		# Determine if this is a newly spawned subprocess or an existing process
+		if hasattr(self, '_subprocess') and self._subprocess and self._subprocess.pid == self.browser_pid:
+			self.logger.info(
+				f'🌎 Connecting to newly spawned browser via CDP {self.cdp_url} -> browser_pid={self.browser_pid} (local)'
+			)
+		else:
+			self.logger.info(
+				f'🌎 Connecting to existing browser via CDP  {self.cdp_url} -> browser_pid={self.browser_pid} (local)'
+			)
 		assert self.playwright is not None, 'playwright instance is None'
 		self.browser = self.browser or await self.playwright.chromium.connect_over_cdp(
 			self.cdp_url,
@@ -738,7 +1018,9 @@ class BrowserSession(BaseModel):
 		if not self.wss_url:
 			return  # no wss_url provided, nothing to do
 
-		self.logger.info(f'🌎 Connecting to existing remote chromium playwright node.js server over WSS: {self.wss_url}')
+		self.logger.info(
+			f'🌎 Connecting to existing playwright node.js browser server over WSS: {self.wss_url} -> (remote playwright)'
+		)
 		assert self.playwright is not None, 'playwright instance is None'
 		self.browser = self.browser or await self.playwright.chromium.connect(
 			self.wss_url,
@@ -754,7 +1036,7 @@ class BrowserSession(BaseModel):
 		if not self.cdp_url:
 			return  # no cdp_url provided, nothing to do
 
-		self.logger.info(f'🌎 Connecting to existing remote chromium-based browser over CDP: {self.cdp_url}')
+		self.logger.info(f'🌎 Connecting to existing chromium-based browser via CDP: {self.cdp_url} -> (remote browser)')
 		assert self.playwright is not None, 'playwright instance is None'
 		self.browser = self.browser or await self.playwright.chromium.connect_over_cdp(
 			self.cdp_url,
@@ -762,16 +1044,47 @@ class BrowserSession(BaseModel):
 		)
 		self._set_browser_keep_alive(True)  # we connected to an existing browser, dont kill it at the end
 
+	@retry(wait=1, retries=2, timeout=45, semaphore_limit=1, semaphore_scope='self', semaphore_lax=False)
 	async def setup_new_browser_context(self) -> None:
 		"""Launch a new browser and browser_context"""
-		current_process = psutil.Process(os.getpid())
-		child_pids_before_launch = {child.pid for child in current_process.children(recursive=True)}
+		# Double-check after semaphore acquisition to prevent duplicate browser launches
+		if self.browser_context:
+			try:
+				# Check if context is still valid and has pages
+				if self.browser_context.pages and not all(page.is_closed() for page in self.browser_context.pages):
+					# self.logger.debug('Browser context already exists after semaphore acquisition, skipping launch')
+					return
+			except Exception:
+				# If we can't check pages, assume context is invalid and continue with launch
+				pass
+		await self._unsafe_setup_new_browser_context()
+
+	async def _unsafe_setup_new_browser_context(self) -> None:
+		"""Unsafe browser context setup without retry protection."""
 
 		# if we have a browser object but no browser_context, use the first context discovered or make a new one
 		if self.browser and not self.browser_context:
-			if self.browser.contexts:
+			# If HAR recording or video recording is requested, we need to create a new context with recording enabled
+			# Cannot reuse existing context as recording must be configured at context creation
+			if (self.browser_profile.record_har_path or self.browser_profile.record_video_dir) and self.browser.contexts:
+				recording_types = []
+				if self.browser_profile.record_har_path:
+					recording_types.append('HAR')
+				if self.browser_profile.record_video_dir:
+					recording_types.append('video')
+				self.logger.info(
+					f'🎥 Creating new browser_context with {" and ".join(recording_types)} recording enabled (cannot reuse existing context)'
+				)
+				self.browser_context = await self.browser.new_context(
+					**self.browser_profile.kwargs_for_new_context().model_dump(mode='json')
+				)
+			elif self.browser.contexts:
 				self.browser_context = self.browser.contexts[0]
-				self.logger.info(f'🌎 Using first browser_context available in existing browser: {self.browser_context}')
+				# Check if this is a newly spawned subprocess
+				if hasattr(self, '_subprocess') and self._subprocess and self._subprocess.pid == self.browser_pid:
+					self.logger.debug(f'👤 Using default browser_context opened in newly spawned browser: {self.browser_context}')
+				else:
+					self.logger.info(f'👤 Using first browser_context found in existing browser: {self.browser_context}')
 			else:
 				self.browser_context = await self.browser.new_context(
 					**self.browser_profile.kwargs_for_new_context().model_dump(mode='json')
@@ -789,7 +1102,7 @@ class BrowserSession(BaseModel):
 		if not self.browser_context:
 			assert self.browser_profile.channel is not None, 'browser_profile.channel is None'
 			self.logger.info(
-				f'🌎 Launching new local browser '
+				f'🎭 Launching new local browser '
 				f'{str(type(self.playwright).__module__).split(".")[0]}:{self.browser_profile.channel.name.lower()} keep_alive={self.browser_profile.keep_alive or False} '
 				f'user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir) or "<incognito>"}'
 			)
@@ -801,30 +1114,145 @@ class BrowserSession(BaseModel):
 				self.browser_profile.user_data_dir = self.browser_profile.user_data_dir or Path(
 					tempfile.mkdtemp(prefix='browseruse-tmp-')
 				)
+			# If we're reconnecting and using a temp directory, create a new one
+			# This avoids conflicts with the previous browser process that might still be shutting down
+			elif self.browser_profile.user_data_dir and Path(self.browser_profile.user_data_dir).name.startswith(
+				'browseruse-tmp-'
+			):
+				old_dir = self.browser_profile.user_data_dir
+				self.browser_profile.user_data_dir = Path(tempfile.mkdtemp(prefix='browseruse-tmp-'))
+				self.logger.debug(
+					f'🗑️ Cleaning up old tmp user_data_dir= {_log_pretty_path(old_dir)} and using fresh one:{_log_pretty_path(self.browser_profile.user_data_dir)}'
+				)
+				try:
+					shutil.rmtree(old_dir)
+				except Exception:
+					self.logger.warning(f'🗑️ Failed to cleanup old tmp user_data_dir= {_log_pretty_path(old_dir)}')
 
-			# user data dir was provided, prepare it for use
+			# user data dir was provided, prepare it for use (handles conflicts automatically)
 			self.prepare_user_data_dir()
 
-			# search for potentially conflicting local processes running on the same user_data_dir
-			for proc in psutil.process_iter(['pid', 'cmdline']):
-				if f'--user-data-dir={self.browser_profile.user_data_dir}' in (proc.info['cmdline'] or []):
-					self.logger.error(
-						f'🚨 Found potentially conflicting browser process browser_pid={proc.info["pid"]} '
-						f'already running with the same user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir)}'
-					)
-					break
-
-			# if a user_data_dir is provided, launch a persistent context with that user_data_dir
+			# if a user_data_dir is provided, launch Chrome as subprocess then connect via CDP
 			try:
 				async with asyncio.timeout(self.browser_profile.timeout / 1000):
 					try:
 						assert self.playwright is not None, 'playwright instance is None'
-						self.browser_context = await self.playwright.chromium.launch_persistent_context(
-							**self.browser_profile.kwargs_for_launch_persistent_context().model_dump(mode='json')
+
+						# Find an available port for remote debugging
+						import socket
+
+						with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+							s.bind(('127.0.0.1', 0))
+							s.listen(1)
+							debug_port = s.getsockname()[1]
+
+						# Get chromium executable path from browser profile or fall back to to playwright default
+						chromium_path = self.browser_profile.executable_path or self.playwright.chromium.executable_path
+
+						# Build chrome launch command with all args
+						chrome_args = self.browser_profile.get_args()
+
+						# Add/replace remote-debugging-port with our chosen port
+						final_args = []
+						for arg in chrome_args:
+							if not arg.startswith('--remote-debugging-port='):
+								final_args.append(arg)
+						final_args.extend(
+							[
+								f'--remote-debugging-port={debug_port}',
+								f'--user-data-dir={self.browser_profile.user_data_dir}',
+							]
 						)
+
+						# Build final command
+						chrome_launch_cmd = [chromium_path] + final_args
+
+						# Launch chrome as subprocess
+						self.logger.info(
+							f' ↳ Spawning Chrome subprocess listening on CDP http://127.0.0.1:{debug_port}/ with user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir)}'
+						)
+						process = await asyncio.create_subprocess_exec(
+							*chrome_launch_cmd,
+							stdout=asyncio.subprocess.PIPE,
+							stderr=asyncio.subprocess.PIPE,
+						)
+
+						# Store the subprocess reference for error handling
+						self._subprocess = process
+
+						# Store the browser PID
+						self.browser_pid = process.pid
+						self._set_browser_keep_alive(False)  # We launched it, so we should close it
+						# self.logger.debug(f'👶 Chrome subprocess launched with browser_pid={process.pid}')
+
+						# Use the existing setup_browser_via_browser_pid method to connect
+						# It will wait for the CDP port to become available
+						await self.setup_browser_via_browser_pid()
+
+						# If connection failed, browser will be None
+						if not self.browser:
+							# Try to get error info from the process
+							if process.returncode is not None:
+								# Chrome exited, try to read stderr for error message
+								stderr_output = ''
+								if process.stderr:
+									try:
+										stderr_bytes = await process.stderr.read()
+										stderr_output = stderr_bytes.decode('utf-8', errors='replace')
+									except Exception:
+										pass
+
+								# Check for common Chrome errors
+								if 'Failed parsing extensions' in stderr_output:
+									raise RuntimeError(
+										f'Failed parsing extensions: Chrome profile incompatibility detected. Chrome exited with code {process.returncode}'
+									)
+								elif 'SingletonLock' in stderr_output or 'ProcessSingleton' in stderr_output:
+									raise RuntimeError(f'SingletonLock error: {stderr_output[:500]}')
+								else:
+									# For any other error, log it and raise to trigger fallback
+									self.logger.warning(
+										f'⚠️ Chrome subprocess exited with code {process.returncode}. Error: {stderr_output[:500] if stderr_output else "No error output"}'
+									)
+									raise RuntimeError(
+										f'Chrome subprocess exited with code {process.returncode}. Error output: {stderr_output[:500] if stderr_output else "No error output"}'
+									)
+							else:
+								# Kill the subprocess if it's still running but we couldn't connect
+								try:
+									process.terminate()
+									await process.wait()
+								except Exception:
+									pass
+								raise RuntimeError(f'Failed to connect to Chrome subprocess on port {debug_port}')
+
 					except Exception as e:
+						# Check if it's a SingletonLock error or Chrome subprocess exit error
+						if (
+							'SingletonLock' in str(e)
+							or 'ProcessSingleton' in str(e)
+							or 'Chrome subprocess exited' in str(e)
+							or isinstance(e, RuntimeError)
+						):
+							# Fall back to temporary directory
+							reason = (
+								'Chrome launch error due to SingletonLock'
+								if 'SingletonLock' in str(e)
+								else 'Chrome subprocess failed to start'
+							)
+							self._fallback_to_temp_profile(reason)
+							# Kill the failed subprocess if it exists
+							if hasattr(self, '_subprocess') and self._subprocess:
+								try:
+									self._subprocess.terminate()
+									await self._subprocess.wait()
+								except Exception:
+									pass
+							# Retry the launch with the new temporary directory
+							await self._unsafe_setup_new_browser_context()
+							return
 						# Re-raise if not a timeout
-						if not isinstance(e, asyncio.TimeoutError):
+						elif not isinstance(e, asyncio.TimeoutError):
 							raise
 			except TimeoutError:
 				self.logger.warning(
@@ -833,13 +1261,18 @@ class BrowserSession(BaseModel):
 				)
 				# Force recreation of the playwright object
 				self.playwright = await self._start_global_playwright_subprocess(is_stealth=self.browser_profile.stealth)
-				# Retry the operation with the new playwright instance
-				async with asyncio.timeout(self.browser_profile.timeout / 1000):
-					assert self.playwright is not None, 'playwright instance is None'
-					self.browser_context = await self.playwright.chromium.launch_persistent_context(
-						**self.browser_profile.kwargs_for_launch_persistent_context().model_dump()
-					)
+				# Retry the whole subprocess launch
+				await self._unsafe_setup_new_browser_context()
+				return
 			except Exception as e:
+				# Check if it's a SingletonLock error from the subprocess
+				if 'SingletonLock' in str(e) or 'ProcessSingleton' in str(e):
+					# Fall back to temporary directory
+					self._fallback_to_temp_profile('Chrome launch error due to SingletonLock')
+					# Retry the launch with the new temporary directory
+					await self._unsafe_setup_new_browser_context()
+					return
+
 				# show a nice logger hint explaining what went wrong with the user_data_dir
 				# calculate the version of the browser that the user_data_dir is for, and the version of the browser we are running with
 				user_data_dir_chrome_version = '???'
@@ -881,66 +1314,18 @@ class BrowserSession(BaseModel):
 		# ^ self.browser can unfortunately still be None at the end ^
 		# playwright does not give us a browser object at all when we use launch_persistent_context()!
 
-		# Detect any new child chrome processes that we might have launched above
-		def is_our_chrome_proc(pid: int) -> psutil.Process | None:
-			try:
-				proc = psutil.Process(pid)
-				cmdline = proc.cmdline()
-				if 'Helper' in proc.name():
-					return None
-				if proc.status() != 'running':
-					return None
-				if (
-					self.browser_profile.executable_path
-					and Path(cmdline[0]).expanduser().resolve()
-					!= Path(self.browser_profile.executable_path).expanduser().resolve()
-				):
-					# self.logger.debug(f'❌ Found new child chrome process that does not match our executable: {str(cmdline)[:50]}')
-					return None
-				if (
-					self.browser_profile.user_data_dir
-					and f'--user-data-dir={Path(self.browser_profile.user_data_dir).expanduser().resolve()}' in cmdline
-				):
-					# self.logger.debug(f'✅ Found new child chrome process that matches our user_data_dir: {str(cmdline)[:50]}')
-					return proc
-				else:
-					# self.logger.debug(f'❌ Found new child chrome process that does not match our user_data_dir: {[arg for arg in cmdline if "--user-data-dir=" in arg]}')
-					return None
-			except Exception:
-				pass
-			return None
-
-		child_pids_after_launch = {child.pid for child in current_process.children(recursive=True)}
-		new_child_pids = child_pids_after_launch - child_pids_before_launch
-		new_child_procs = list(filter(bool, (is_our_chrome_proc(pid) for pid in new_child_pids)))
-		if not new_child_procs:
-			self.logger.debug(f'❌ Failed to find any new child chrome processes after launching new browser: {new_child_pids}')
-			new_chrome_proc = None
-		elif len(new_child_procs) > 1:
-			self.logger.debug(f'❌ Found multiple new child chrome processes after launching new browser: {new_child_procs}')
-			new_chrome_proc = None
-		else:
-			new_chrome_proc = new_child_procs[0]
-
-		if new_chrome_proc and not self.browser_pid:
-			# look through the discovered new chrome processes to uniquely identify the one that *we* launched,
-			# match using unique user_data_dir
-			try:
-				self.browser_pid = new_chrome_proc.pid
-				cmdline = new_chrome_proc.cmdline()
-				executable_path = cmdline[0] if cmdline else 'unknown'
-				self.logger.info(f' ↳ Spawned browser_pid={self.browser_pid} {_log_pretty_path(executable_path)}')
-				if cmdline:
-					self.logger.debug(' '.join(cmdline))  # print the entire launch command for debugging
-				self._set_browser_keep_alive(False)  # close the browser at the end because we launched it
-			except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-				self.logger.warning(f'Browser process {self.browser_pid} died immediately after launch: {type(e).__name__}')
+		# PID detection is no longer needed since we get PIDs directly from subprocesses or passed objects
 
 		if self.browser:
 			assert self.browser.is_connected(), (
 				f'Browser is not connected, did the browser process crash or get killed? (connection method: {self._connection_str})'
 			)
-		self.logger.debug(f'🪢 Browser {self._connection_str} connected {self.browser or self.browser_context}')
+			# Only log final connection if we didn't already log it via setup_browser_via_browser_pid
+			if not (hasattr(self, '_subprocess') and self._subprocess and self._subprocess.pid == self.browser_pid):
+				self.logger.debug(f'🪢 Browser {self._connection_str} connected {self.browser or self.browser_context}')
+		elif self.browser_context and not self.browser:
+			# For launch_persistent_context case where we don't get a browser object
+			self.logger.debug(f'🪢 Browser context {self._connection_str} connected {self.browser_context}')
 
 		assert self.browser_context, (
 			f'{self} Failed to create a playwright BrowserContext {self.browser_context} for browser={self.browser}'
@@ -1037,6 +1422,7 @@ class BrowserSession(BaseModel):
 	# 	self.browser_profile.user_data_dir = fork_path
 	# 	self.browser_profile.prepare_user_data_dir()
 
+	@observe_debug(name='setup_current_page_change_listeners')
 	async def _setup_current_page_change_listeners(self) -> None:
 		# Uses a combination of:
 		# - visibilitychange events
@@ -1060,7 +1446,7 @@ class BrowserSession(BaseModel):
 		if pages:
 			foreground_page = pages[0]
 			self.logger.debug(
-				f'👁️‍🗨️ Found {len(pages)} existing tabs in browser, agent session {self.id[-4:]}.{str(id(self.agent_current_page))[-2:]} will start focused on Tab [{pages.index(foreground_page)}]: {foreground_page.url}'  # type: ignore
+				f'👁️‍🗨️ Found {len(pages)} existing tabs in browser, Agent 🅰 {self.id[-4:]} is on Page 🅟 {str(id(foreground_page))[-2:]}: {_log_pretty_url(foreground_page.url)}'  # type: ignore
 			)
 		else:
 			foreground_page = await self.browser_context.new_page()
@@ -1148,8 +1534,8 @@ class BrowserSession(BaseModel):
 		# self.logger.info(f'Setting up visibility listeners for {len(self.browser_context.pages)} pages')
 		for page in self.browser_context.pages:
 			# self.logger.info(f'Processing page with URL: {repr(page.url)}')
-			# Skip about:blank pages as they can hang when evaluating scripts
-			if page.url == 'about:blank':
+			# Skip new tab pages as they can hang when evaluating scripts
+			if is_new_tab_page(page.url):
 				continue
 
 			try:
@@ -1161,6 +1547,7 @@ class BrowserSession(BaseModel):
 					f'⚠️ Failed to add visibility listener to existing tab, is it crashed or ignoring CDP commands?: [{page_idx}]{page.url}: {type(e).__name__}: {e}'
 				)
 
+	@observe_debug(name='setup_viewports', metadata={'browser_profile': '{{browser_profile}}'})
 	async def _setup_viewports(self) -> None:
 		"""Resize any existing page viewports to match the configured size, set up storage_state, permissions, geolocation, etc."""
 
@@ -1236,8 +1623,15 @@ class BrowserSession(BaseModel):
 			if viewport:
 				await page.set_viewport_size(viewport)
 
-			# show browser-use dvd screensaver-style bouncing loading animation on any about:blank pages
-			if page.url == 'about:blank':
+			# show browser-use dvd screensaver-style bouncing loading animation on any new tab pages
+			if is_new_tab_page(page.url):
+				# Navigate to about:blank if we're on chrome://new-tab-page to avoid security restrictions
+				if page.url.startswith('chrome://new-tab-page'):
+					try:
+						# can raise exception if nav is interrupted by another agent nav or human, harmless but annoying
+						await page.goto('about:blank', wait_until='load', timeout=5000)
+					except Exception:
+						pass
 				await self._show_dvd_screensaver_loading_animation(page)
 
 		page = page or (await self.browser_context.new_page())
@@ -1259,7 +1653,10 @@ class BrowserSession(BaseModel):
 						},
 					},
 				)
-				await cdp_session.detach()
+				try:
+					await asyncio.wait_for(cdp_session.detach(), timeout=1.0)
+				except (TimeoutError, Exception):
+					pass
 			except Exception as e:
 				_log_size = lambda size: f'{size["width"]}x{size["height"]}px'
 				try:
@@ -1273,7 +1670,7 @@ class BrowserSession(BaseModel):
 					pass
 
 				self.logger.warning(
-					f'⚠️ Failed to resize browser window to {_log_size(self.browser_profile.window_size)} using CDP setWindowBounds: {type(e).__name__}: {e}'
+					f'⚠️ Failed to resize browser window to {_log_size(self.browser_profile.window_size)} via CDP setWindowBounds: {type(e).__name__}: {e}'
 				)
 
 	def _set_browser_keep_alive(self, keep_alive: bool | None) -> None:
@@ -1281,6 +1678,7 @@ class BrowserSession(BaseModel):
 		if self.browser_profile.keep_alive is None:
 			self.browser_profile.keep_alive = keep_alive
 
+	@observe_debug(name='is_connected')
 	async def is_connected(self, restart: bool = True) -> bool:
 		"""
 		Check if the browser session has valid, connected browser and context objects.
@@ -1302,17 +1700,30 @@ class BrowserSession(BaseModel):
 
 		# Check if the browser_context itself is closed/unusable
 		try:
-			# TODO: figure out a better synchronous test for whether browser_context is usable
-			# this is a hacky workaround for the fact that playwright's browser_context has no is_connected() method
-			# and browser_context.browser is None when we launch with a persistent context (basically always)
+			# The only reliable way to check if a browser context is still valid
+			# is to try to use it. We'll try a simple page.evaluate() call.
 			if self.browser_context.pages:
-				return True
+				# Use the first available page to test the connection
+				test_page = self.browser_context.pages[0]
+				# Try a simple evaluate to check if the connection is alive
+				result = await test_page.evaluate('() => true')
+				return result is True
 			elif restart:
-				await self.create_new_tab()
-				return True
+				# Create new page directly to avoid using decorated methods
+				new_page = await self.browser_context.new_page()
+				self.agent_current_page = new_page
+				if (not self.human_current_page) or self.human_current_page.is_closed():
+					self.human_current_page = new_page
+				# Test the new tab
+				if self.browser_context.pages:
+					test_page = self.browser_context.pages[0]
+					result = await test_page.evaluate('() => true')
+					return result is True
+				return False
 			else:
 				return False
 		except Exception:
+			# Any exception means the context is closed or invalid
 			return False
 
 	def _reset_connection_state(self) -> None:
@@ -1336,6 +1747,9 @@ class BrowserSession(BaseModel):
 		self.agent_current_page = None
 		self.human_current_page = None
 		self._cached_clickable_element_hashes = None
+		# Reset CDP connection info when browser is stopped
+		self.cdp_url = None
+		self.browser_pid = None
 		self._cached_browser_state_summary = None
 		# Don't clear self.playwright here - it should be cleared explicitly in kill()
 
@@ -1356,9 +1770,85 @@ class BrowserSession(BaseModel):
 		if not already_disconnected:
 			self.logger.debug(f'⚰️ Browser {self._connection_str} disconnected')
 
-	def prepare_user_data_dir(self) -> None:
-		"""Create and unlock the user data dir and ensure all recording paths exist."""
+	def _check_for_singleton_lock_conflict(self) -> bool:
+		"""Check if the user data directory has a conflicting browser process.
 
+		Returns:
+			True if there's a conflict (active process using this profile), False otherwise
+		"""
+		if not self.browser_profile.user_data_dir:
+			return False
+
+		# Normalize the path for comparison
+		target_dir = str(Path(self.browser_profile.user_data_dir).expanduser().resolve())
+
+		# Check for running processes using this user data dir
+		for proc in psutil.process_iter(['pid', 'cmdline']):
+			# Skip our own browser process
+			if hasattr(self, 'browser_pid') and self.browser_pid and proc.info['pid'] == self.browser_pid:
+				continue
+
+			cmdline = proc.info['cmdline'] or []
+
+			# Check both formats: --user-data-dir=/path and --user-data-dir /path
+			for i, arg in enumerate(cmdline):
+				# Combined format: --user-data-dir=/path
+				if arg.startswith('--user-data-dir='):
+					try:
+						cmd_path = str(Path(arg.split('=', 1)[1]).expanduser().resolve())
+						if cmd_path == target_dir:
+							self.logger.debug(
+								f'🔍 Found conflicting Chrome process PID {proc.info["pid"]} using profile {_log_pretty_path(self.browser_profile.user_data_dir)}'
+							)
+							return True
+					except Exception:
+						# Fallback to string comparison if path resolution fails
+						if arg.split('=', 1)[1] == str(self.browser_profile.user_data_dir):
+							self.logger.debug(
+								f'🔍 Found conflicting Chrome process PID {proc.info["pid"]} using profile {_log_pretty_path(self.browser_profile.user_data_dir)}'
+							)
+							return True
+				# Separate format: --user-data-dir /path
+				elif arg == '--user-data-dir' and i + 1 < len(cmdline):
+					try:
+						cmd_path = str(Path(cmdline[i + 1]).expanduser().resolve())
+						if cmd_path == target_dir:
+							self.logger.debug(
+								f'🔍 Found conflicting Chrome process PID {proc.info["pid"]} using profile {_log_pretty_path(self.browser_profile.user_data_dir)}'
+							)
+							return True
+					except Exception:
+						# Fallback to string comparison if path resolution fails
+						if cmdline[i + 1] == str(self.browser_profile.user_data_dir):
+							self.logger.debug(
+								f'🔍 Found conflicting Chrome process PID {proc.info["pid"]} using profile {_log_pretty_path(self.browser_profile.user_data_dir)}'
+							)
+							return True
+
+		# Note: We don't consider a SingletonLock file alone as a conflict
+		# because it might be stale. Only actual running processes count as conflicts.
+		return False
+
+	def _fallback_to_temp_profile(self, reason: str = 'SingletonLock conflict') -> None:
+		"""Fallback to a temporary profile directory when the current one is locked.
+
+		Args:
+			reason: Human-readable reason for the fallback
+		"""
+		old_dir = self.browser_profile.user_data_dir
+		self.browser_profile.user_data_dir = Path(tempfile.mkdtemp(prefix='browseruse-tmp-singleton-'))
+		self.logger.warning(
+			f'⚠️ {reason} detected. Profile at {_log_pretty_path(old_dir)} is locked. '
+			f'Using temporary profile instead: {_log_pretty_path(self.browser_profile.user_data_dir)}'
+		)
+
+	@observe_debug(name='prepare_user_data_dir')
+	def prepare_user_data_dir(self, check_conflicts: bool = True) -> None:
+		"""Create and prepare the user data dir, handling conflicts if needed.
+
+		Args:
+			check_conflicts: Whether to check for and handle singleton lock conflicts
+		"""
 		if self.browser_profile.user_data_dir:
 			try:
 				self.browser_profile.user_data_dir = Path(self.browser_profile.user_data_dir).expanduser().resolve()
@@ -1369,13 +1859,59 @@ class BrowserSession(BaseModel):
 					f'Unusable path provided for user_data_dir= {_log_pretty_path(self.browser_profile.user_data_dir)} (check for typos/permissions issues)'
 				) from e
 
-			# clear any existing locks by any other chrome processes (hacky)
+			# Remove stale singleton lock file ONLY if no process is using this profile
+			# This must happen BEFORE checking for conflicts to avoid false positives
 			singleton_lock = self.browser_profile.user_data_dir / 'SingletonLock'
 			if singleton_lock.exists():
-				singleton_lock.unlink()
-				self.logger.warning(
-					f'⚠️ Multiple chrome processes may be trying to share user_data_dir={self.browser_profile.user_data_dir} which can lead to crashes and profile data corruption!'
-				)
+				# Check if any process is actually using this user_data_dir
+				has_active_process = False
+				target_dir = str(self.browser_profile.user_data_dir)
+				for proc in psutil.process_iter(['pid', 'cmdline']):
+					# Skip our own browser process
+					if hasattr(self, 'browser_pid') and self.browser_pid and proc.info['pid'] == self.browser_pid:
+						continue
+
+					cmdline = proc.info['cmdline'] or []
+					# Check both formats: --user-data-dir=/path and --user-data-dir /path
+					for i, arg in enumerate(cmdline):
+						if arg.startswith('--user-data-dir='):
+							try:
+								if str(Path(arg.split('=', 1)[1]).expanduser().resolve()) == target_dir:
+									has_active_process = True
+									break
+							except Exception:
+								if arg.split('=', 1)[1] == str(self.browser_profile.user_data_dir):
+									has_active_process = True
+									break
+						elif arg == '--user-data-dir' and i + 1 < len(cmdline):
+							try:
+								if str(Path(cmdline[i + 1]).expanduser().resolve()) == target_dir:
+									has_active_process = True
+									break
+							except Exception:
+								if cmdline[i + 1] == str(self.browser_profile.user_data_dir):
+									has_active_process = True
+									break
+					if has_active_process:
+						break
+
+				if not has_active_process:
+					# No active process, safe to remove stale lock
+					try:
+						# Handle both regular files and symlinks
+						if singleton_lock.is_symlink() or singleton_lock.exists():
+							singleton_lock.unlink()
+							self.logger.debug(
+								f'🧹 Removed stale SingletonLock file from {_log_pretty_path(self.browser_profile.user_data_dir)} (no active Chrome process found)'
+							)
+					except Exception:
+						pass  # Ignore errors removing lock file
+
+			# Check for conflicts and fallback if needed (AFTER cleaning stale locks)
+			if check_conflicts and self._check_for_singleton_lock_conflict():
+				self._fallback_to_temp_profile()
+				# Recursive call without conflict checking to prepare the new temp dir
+				return self.prepare_user_data_dir(check_conflicts=False)
 
 		# Create directories for all paths that need them
 		dir_paths = {
@@ -1408,6 +1944,7 @@ class BrowserSession(BaseModel):
 					self.logger.error(f'❌ Failed to create parent directory for {path_name} {path_value}: {e}')
 
 	# --- Tab management ---
+	@observe_debug(name='get_current_page', ignore_input=True)
 	async def get_current_page(self) -> Page:
 		"""Get the current page + ensure it's not None / closed"""
 
@@ -1437,9 +1974,11 @@ class BrowserSession(BaseModel):
 				self.human_current_page = first_available_tab
 			else:
 				# if all tabs are closed, open a new one, never allow a context with 0 tabs
-				new_tab = await self.create_new_tab()
-				self.agent_current_page = new_tab
-				self.human_current_page = new_tab
+				new_page = await self.browser_context.new_page()
+				self.agent_current_page = new_page
+				self.human_current_page = new_page
+				if self.browser_profile.viewport:
+					await new_page.set_viewport_size(self.browser_profile.viewport)
 
 		assert self.agent_current_page is not None, f'{self} Failed to find or create a new page for the agent'
 		assert self.human_current_page is not None, f'{self} Failed to find or create a new page for the human'
@@ -1452,11 +1991,7 @@ class BrowserSession(BaseModel):
 			return []
 		return list(self.browser_context.pages)
 
-	@require_initialization
-	async def new_tab(self, url: str | None = None) -> Page:
-		return await self.create_new_tab(url=url)
-
-	@require_initialization
+	@require_healthy_browser(usable_page=False, reopen_page=False)
 	async def switch_tab(self, tab_index: int) -> Page:
 		assert self.browser_context is not None, 'BrowserContext is not set up'
 		pages = self.browser_context.pages
@@ -1465,15 +2000,22 @@ class BrowserSession(BaseModel):
 		page = pages[tab_index]
 		self.agent_current_page = page
 
+		# Invalidate cached state since we've switched to a different tab
+		# The cached state contains DOM elements and selector map from the previous tab
+		self._cached_browser_state_summary = None
+		self._cached_clickable_element_hashes = None
+
 		return page
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def wait_for_element(self, selector: str, timeout: int = 10000) -> None:
 		page = await self.get_current_page()
 		await page.wait_for_selector(selector, state='visible', timeout=timeout)
 
-	@require_initialization
+	@observe_debug(name='remove_highlights', ignore_output=True, ignore_input=True)
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--remove_highlights')
+	@retry(timeout=2, retries=0)
 	async def remove_highlights(self):
 		"""
 		Removes all highlight overlays and labels created by the highlightElement function.
@@ -1504,13 +2046,13 @@ class BrowserSession(BaseModel):
 			self.logger.debug(f'⚠️ Failed to remove highlights (this is usually ok): {type(e).__name__}: {e}')
 			# Don't raise the error since this is not critical functionality
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_dom_element_by_index(self, index: int) -> DOMElementNode | None:
 		"""Get DOM element by index."""
 		selector_map = await self.get_selector_map()
 		return selector_map.get(index)
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--click_element_node')
 	async def _click_element_node(self, element_node: DOMElementNode) -> str | None:
 		"""
@@ -1527,9 +2069,6 @@ class BrowserSession(BaseModel):
 			if element_handle is None:
 				raise Exception(f'Element: {repr(element_node)} not found')
 
-			# Check if element is likely to cause navigation
-			is_navigation_element = self._is_navigation_element(element_node)
-
 			async def perform_click(click_func):
 				"""Performs the actual click, handling both download and navigation scenarios."""
 
@@ -1539,7 +2078,7 @@ class BrowserSession(BaseModel):
 				if self.browser_profile.downloads_path:
 					try:
 						# Try short-timeout expect_download to detect a file download has been been triggered
-						async with page.expect_download(timeout=5000) as download_info:
+						async with page.expect_download(timeout=5_000) as download_info:
 							await click_func()
 						download = await download_info.value
 						# Determine file path
@@ -1575,6 +2114,11 @@ class BrowserSession(BaseModel):
 						)
 					await self._check_and_handle_navigation(page)
 
+			# BUGOWL: Handle navigation element and page change
+
+			# Check if element is likely to cause navigation
+			is_navigation_element = self._is_navigation_element(element_node)
+
 			# Handle navigation elements with expect_navigation
 			if is_navigation_element:
 				try:
@@ -1600,11 +2144,7 @@ class BrowserSession(BaseModel):
 				raise e
 			except Exception as e:
 				# Check if it's a context error and provide more info
-				if (
-					'Cannot find context with specified id' in str(e)
-					or 'Protocol error' in str(e)
-					or 'Execution context was destroyed' in str(e)
-				):
+				if 'Cannot find context with specified id' in str(e) or 'Protocol error' in str(e):
 					self.logger.warning(f'⚠️ Element context lost, attempting to re-locate element: {type(e).__name__}')
 					# Try to re-locate the element
 					element_handle = await self.get_locate_element(element_node)
@@ -1612,7 +2152,7 @@ class BrowserSession(BaseModel):
 						raise Exception(f'Element no longer exists in DOM after context loss: {repr(element_node)}')
 					# Try click again with fresh element
 					try:
-						return await perform_click(lambda: element_handle.click(timeout=1500))
+						return await perform_click(lambda: element_handle.click(timeout=1_500))
 					except Exception:
 						# Fall back to JavaScript click
 						return await perform_click(lambda: page.evaluate('(el) => el.click()', element_handle))
@@ -1684,25 +2224,55 @@ class BrowserSession(BaseModel):
 
 		return False
 
-	@require_initialization
 	@time_execution_async('--get_tabs_info')
+	@retry(timeout=6, retries=1)
+	@require_healthy_browser(usable_page=False, reopen_page=False)
 	async def get_tabs_info(self) -> list[TabInfo]:
 		"""Get information about all tabs"""
 		assert self.browser_context is not None, 'BrowserContext is not set up'
 		tabs_info = []
 		for page_id, page in enumerate(self.browser_context.pages):
 			try:
-				tab_info = TabInfo(page_id=page_id, url=page.url, title=await asyncio.wait_for(page.title(), timeout=1))
-			except TimeoutError:
+				title = await asyncio.wait_for(page.title(), timeout=3.0)
+				tab_info = TabInfo(page_id=page_id, url=page.url, title=title)
+			except Exception:
 				# page.title() can hang forever on tabs that are crashed/disappeared/about:blank
-				# we dont want to try automating those tabs because they will hang the whole script
-				self.logger.debug(f'⚠️ Failed to get tab info for tab #{page_id}: {_log_pretty_url(page.url)} (ignoring)')
-				tab_info = TabInfo(page_id=page_id, url='about:blank', title='ignore this tab and do not use it')
+				# but we should preserve the real URL and not mislead the LLM about tab availability
+				self.logger.debug(
+					f'⚠️ Failed to get tab info for tab #{page_id}: {_log_pretty_url(page.url)} (using fallback title)'
+				)
+
+				# Only mark as unusable if it's actually about:blank, otherwise preserve the real URL
+				if page.url == 'about:blank':
+					tab_info = TabInfo(page_id=page_id, url='about:blank', title='ignore this tab and do not use it')
+				else:
+					# Preserve the real URL and use a descriptive fallback title
+					# fallback_title = '(title unavailable, page possibly crashed / unresponsive)'
+					# tab_info = TabInfo(page_id=page_id, url=page.url, title=fallback_title)
+
+					# harsh but good, just close the page here because if we cant get the title then we certainly cant do anything else useful with it, no point keeping it open
+					try:
+						await page.close()
+						self.logger.debug(
+							f'🪓 Force-closed 🅟 {str(id(page))[-2:]} because its JS engine is unresponsive via CDP: {_log_pretty_url(page.url)}'
+						)
+					except Exception:
+						pass
+					continue
+
 			tabs_info.append(tab_info)
 
 		return tabs_info
 
-	@require_initialization
+	@retry(timeout=20, retries=1, semaphore_limit=1, semaphore_scope='self')
+	async def _set_viewport_size(self, page: Page, viewport: dict[str, int] | ViewportSize) -> None:
+		"""Set viewport size with timeout protection."""
+		if isinstance(viewport, dict):
+			await page.set_viewport_size(ViewportSize(width=viewport['width'], height=viewport['height']))
+		else:
+			await page.set_viewport_size(viewport)
+
+	@require_healthy_browser(usable_page=False, reopen_page=False)
 	async def close_tab(self, tab_index: int | None = None) -> None:
 		assert self.browser_context is not None, 'BrowserContext is not set up'
 		pages = self.browser_context.pages
@@ -1724,25 +2294,140 @@ class BrowserSession(BaseModel):
 		await self.get_current_page()
 
 	# --- Page navigation ---
-	@require_initialization
-	async def navigate(self, url: str) -> None:
-		# Add https:// if there's no protocol
+	@observe_debug()
+	@retry(retries=0, timeout=30, wait=1, semaphore_timeout=10, semaphore_limit=1, semaphore_scope='self', semaphore_lax=True)
+	@require_healthy_browser(usable_page=False, reopen_page=False)
+	async def navigate(self, url: str = 'about:blank', new_tab: bool = False, timeout_ms: int | None = None) -> Page:
+		"""
+		Universal navigation method that handles all navigation scenarios.
 
+		Args:
+			url: URL to navigate to (defaults to 'about:blank')
+			new_tab: If True, creates a new tab for navigation
+
+		Returns:
+			Page: The page that was navigated
+		"""
+		# Normalize the URL
 		normalized_url = normalize_url(url)
 
-		if self.agent_current_page:
-			await self.agent_current_page.goto(normalized_url, wait_until='domcontentloaded')
-		else:
-			await self.create_new_tab(normalized_url)
+		# Check if URL is allowed
+		if not self._is_url_allowed(normalized_url):
+			raise BrowserError(f'⛔️ Navigation to non-allowed URL: {normalized_url}')
 
-	@require_initialization
+		timeout_ms = min(3000, int(timeout_ms or self.browser_profile.default_navigation_timeout or 12000))
+
+		# Handle new tab creation
+		if new_tab:
+			# Create new tab
+			assert self.browser_context is not None, 'Browser context is not set'
+			self.agent_current_page = await self.browser_context.new_page()
+
+			# Update human tab reference if there is no human tab yet
+			if (not self.human_current_page) or self.human_current_page.is_closed():
+				self.human_current_page = self.agent_current_page
+
+			# Set viewport for new tab
+			if self.browser_profile.viewport:
+				await self.agent_current_page.set_viewport_size(self.browser_profile.viewport)
+
+			page = self.agent_current_page
+		else:
+			# Use existing page
+			page = await self.get_current_page()
+
+		# Navigate to URL
+		try:
+			# Use asyncio.wait to prevent hanging on slow page loads
+			# Don't cap the timeout - respect what was requested
+			self.logger.debug(f'🧭 Starting navigation to {_log_pretty_url(normalized_url)} with timeout {timeout_ms}ms')
+			nav_task = asyncio.create_task(page.goto(normalized_url, wait_until='load', timeout=timeout_ms))
+			done, pending = await asyncio.wait([nav_task], timeout=(timeout_ms + 500) / 1000)
+
+			if nav_task in pending:
+				# Navigation timed out
+				self.logger.warning(
+					f"⚠️ Loading {_log_pretty_url(normalized_url)} didn't finish after {timeout_ms / 1000}s, continuing anyway..."
+				)
+				nav_task.cancel()
+				try:
+					await nav_task
+				except asyncio.CancelledError:
+					pass
+
+				# Check if page is still usable after timeout
+				if page and not page.is_closed():
+					current_url = page.url
+					# self.logger.debug(f'🤌 Checking responsiveness after navigation timeout (current URL: {current_url})')
+					is_responsive = await self._is_page_responsive(page, timeout=3.0)
+					if is_responsive:
+						self.logger.debug(
+							f'✅ Page is responsive and usable despite navigation loading timeout on: {_log_pretty_url(current_url)})'
+						)
+					else:
+						self.logger.error(
+							f'❌ Page is unresponsive after navigation stalled on: {_log_pretty_url(current_url)} WARNING! Subsequent operations will likely fail on this page, it must be reset...'
+						)
+						# Don't try complex recovery during navigate - just raise the error
+						# The retry decorator will handle retries, and other methods with
+						# @require_healthy_browser(reopen_page=True) will trigger proper recovery
+						raise RuntimeError(
+							f'Page JS engine is unresponsive after navigation / loading issue on: {_log_pretty_url(current_url)}). Agent cannot proceed with this page because its JS event loop is unresponsive.'
+						)
+			elif nav_task in done:
+				# Navigation completed, check if it succeeded
+				await nav_task  # This will raise if navigation failed
+		except Exception as e:
+			if 'timeout' in str(e).lower():
+				# self.logger.warning(
+				# 	f"⚠️ Loading {_log_pretty_url(normalized_url)} didn't finish and further operations may fail on this page..."
+				# )
+				pass  # allow agent to attempt to continue without raising hard error, it can use tools to work around it
+			else:
+				raise
+
+		# Show DVD animation on new tab pages if no URL specified
+		if new_tab and is_new_tab_page(page.url):
+			# Navigate to about:blank if we're on chrome://new-tab-page to avoid security restrictions
+			if page.url.startswith('chrome://new-tab-page'):
+				try:
+					await page.goto('about:blank', wait_until='load', timeout=timeout_ms)
+				except Exception:
+					pass
+			await self._show_dvd_screensaver_loading_animation(page)
+
+		return page
+
+	@deprecated('Use BrowserSession.navigate(url) instead of .navigate_to(url)')
+	async def navigate_to(self, url: str) -> Page:
+		"""Backward compatibility alias for navigate()"""
+		return await self.navigate(url=url, new_tab=False)
+
+	@deprecated('Use BrowserSession.navigate(url=url, new_tab=True) instead of .create_new_tab(url)')
+	async def create_new_tab(self, url: str | None = None) -> Page:
+		"""Backward compatibility alias for navigate()"""
+		return await self.navigate(url=url or 'about:blank', new_tab=True)
+
+	@deprecated('Use BrowserSession.navigate(url=url, new_tab=True) instead of .new_tab(url)')
+	async def new_tab(self, url: str | None = None) -> Page:
+		"""Backward compatibility alias for navigate()"""
+		return await self.navigate(url=url or 'about:blank', new_tab=True)
+
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def refresh(self) -> None:
 		if self.agent_current_page and not self.agent_current_page.is_closed():
 			await self.agent_current_page.reload()
 		else:
-			await self.create_new_tab()
+			# Create new page directly
+			assert self.browser_context is not None, 'Browser context is not set'
+			new_page = await self.browser_context.new_page()
+			self.agent_current_page = new_page
+			if (not self.human_current_page) or self.human_current_page.is_closed():
+				self.human_current_page = new_page
+			if self.browser_profile.viewport:
+				await new_page.set_viewport_size(self.browser_profile.viewport)
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def execute_javascript(self, script: str) -> Any:
 		page = await self.get_current_page()
 		return await page.evaluate(script)
@@ -1752,6 +2437,7 @@ class BrowserSession(BaseModel):
 			return [dict(x) for x in await self.browser_context.cookies()]
 		return []
 
+	@deprecated('Use BrowserSession.save_storage_state() instead')
 	async def save_cookies(self, *args, **kwargs) -> None:
 		"""
 		Old name for the new save_storage_state() function.
@@ -1821,11 +2507,19 @@ class BrowserSession(BaseModel):
 		except Exception as e:
 			self.logger.warning(f'❌ Failed to save cookies to storage_state= {_log_pretty_path(path)}: {type(e).__name__}: {e}')
 
+	@retry(
+		timeout=5, retries=1, semaphore_limit=1, semaphore_scope='self'
+	)  # users can share JSON between browsers, this should really be 'multiprocess' not 'self
 	async def save_storage_state(self, path: Path | None = None) -> None:
 		"""
 		Save cookies to the specified path or the configured cookies_file and/or storage_state.
 		"""
+		await self._unsafe_save_storage_state(path)
 
+	async def _unsafe_save_storage_state(self, path: Path | None = None) -> None:
+		"""
+		Unsafe storage state save logic without retry protection.
+		"""
 		if not (path or self.browser_profile.storage_state or self.browser_profile.cookies_file):
 			return
 
@@ -1955,6 +2649,21 @@ class BrowserSession(BaseModel):
 		"""
 		self.logger.debug(f'📁 Retrieved {len(self._downloaded_files)} downloaded files from session tracking')
 		return self._downloaded_files.copy()
+
+	def set_auto_download_pdfs(self, enabled: bool) -> None:
+		"""
+		Enable or disable automatic PDF downloading when PDFs are encountered.
+
+		Args:
+		    enabled: Whether to automatically download PDFs
+		"""
+		self._auto_download_pdfs = enabled
+		self.logger.info(f'📄 PDF auto-download {"enabled" if enabled else "disabled"}')
+
+	@property
+	def auto_download_pdfs(self) -> bool:
+		"""Get current PDF auto-download setting."""
+		return self._auto_download_pdfs
 
 	# @property
 	# def browser_extension_pages(self) -> list[Page]:
@@ -2144,6 +2853,7 @@ class BrowserSession(BaseModel):
 		if elapsed > 1:
 			self.logger.debug(f'💤 Page network traffic calmed down after {now - start_time:.2f} seconds')
 
+	@observe_debug(name='wait_for_page_and_frames_load')
 	async def _wait_for_page_and_frames_load(self, timeout_overwrite: float | None = None):
 		"""
 		Ensures page is fully loaded before continuing.
@@ -2171,22 +2881,8 @@ class BrowserSession(BaseModel):
 		elapsed = time.time() - start_time
 		remaining = max((timeout_overwrite or self.browser_profile.minimum_wait_page_load_time) - elapsed, 0)
 
-		# just for logging, calculate how much data was downloaded
-		try:
-			bytes_used = await page.evaluate("""
-				() => {
-					let total = 0;
-					for (const entry of performance.getEntriesByType('resource')) {
-						total += entry.transferSize || 0;
-					}
-					for (const nav of performance.getEntriesByType('navigation')) {
-						total += nav.transferSize || 0;
-					}
-					return total;
-				}
-			""")
-		except Exception:
-			bytes_used = None
+		# Skip expensive performance API logging - can cause significant delays on complex pages
+		bytes_used = None
 
 		try:
 			tab_idx = self.tabs.index(page)
@@ -2199,10 +2895,10 @@ class BrowserSession(BaseModel):
 
 		if bytes_used is not None:
 			self.logger.info(
-				f'🌐🌐 Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} used {bytes_used / 1024:.1f} KB in {elapsed:.2f}s{extra_delay}'
+				f'➡️ Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} used {bytes_used / 1024:.1f} KB in {elapsed:.2f}s{extra_delay}'
 			)
 		else:
-			self.logger.info(f'🌐🌐 Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} took {elapsed:.2f}s{extra_delay}')
+			self.logger.info(f'➡️ Page navigation [{tab_idx}]{_log_pretty_url(page.url, 40)} took {elapsed:.2f}s{extra_delay}')
 
 		# Sleep remaining time if needed
 		if remaining > 0:
@@ -2222,8 +2918,8 @@ class BrowserSession(BaseModel):
 		if not self.browser_profile.allowed_domains:
 			return True  # allowed_domains are not configured, allow everything by default
 
-		# Special case: Always allow 'about:blank' new tab page
-		if url == 'about:blank':
+		# Special case: Always allow new tab pages
+		if is_new_tab_page(url):
 			return True
 
 		for allowed_domain in self.browser_profile.allowed_domains:
@@ -2236,7 +2932,7 @@ class BrowserSession(BaseModel):
 						_log_glob_warning(domain, allowed_domain, self.logger)
 					return True
 			except AssertionError:
-				# This would only happen if about:blank is passed to match_url_with_domain_pattern,
+				# This would only happen if a new tab page is passed to match_url_with_domain_pattern,
 				# which shouldn't occur since we check for it above
 				continue
 
@@ -2252,25 +2948,7 @@ class BrowserSession(BaseModel):
 				self.logger.error(f'⛔️ Failed to go back after detecting non-allowed URL: {type(e).__name__}: {e}')
 			raise URLNotAllowedError(f'Navigation to non-allowed URL: {page.url}')
 
-	async def navigate_to(self, url: str):
-		"""Navigate the agent's current tab to a URL"""
-
-		# Add https:// if there's no protocol
-
-		normalized_url = normalize_url(url)
-
-		if not self._is_url_allowed(normalized_url):
-			raise BrowserError(f'Navigation to non-allowed URL: {normalized_url}')
-
-		page = await self.get_current_page()
-		await page.goto(normalized_url)
-		try:
-			await page.wait_for_load_state()
-		except Exception as e:
-			self.logger.warning(
-				f'⚠️ Page {_log_pretty_url(page.url)} failed to fully load after navigation: {type(e).__name__}: {e}'
-			)
-
+	@observe_debug()
 	async def refresh_page(self):
 		"""Refresh the agent's current page"""
 
@@ -2280,27 +2958,46 @@ class BrowserSession(BaseModel):
 			await page.wait_for_load_state()
 		except Exception as e:
 			self.logger.warning(f'⚠️ Page {_log_pretty_url(page.url)} failed to fully load after refresh: {type(e).__name__}: {e}')
+			assert await page.evaluate('1'), (
+				f'Page {page.url} crashed after {type(e).__name__} and can no longer be used via CDP: {e}'
+			)
 
 	async def go_back(self):
 		"""Navigate the agent's tab back in browser history"""
 		try:
 			# 10 ms timeout
 			page = await self.get_current_page()
-			await page.go_back(timeout=10, wait_until='domcontentloaded')
+			await page.go_back(timeout=10_000, wait_until='load')
 
 			# await self._wait_for_page_and_frames_load(timeout_overwrite=1.0)
 		except Exception as e:
 			# Continue even if its not fully loaded, because we wait later for the page to load
 			self.logger.debug(f'⏮️ Error during go_back: {type(e).__name__}: {e}')
+			# Verify page is still usable after navigation error
+			if 'timeout' in str(e).lower():
+				try:
+					assert await page.evaluate('1'), (
+						f'Page {page.url} crashed after go_back {type(e).__name__} and can no longer be used via CDP: {e}'
+					)
+				except Exception as eval_error:
+					self.logger.error(f'❌ Page crashed after go_back timeout: {eval_error}')
 
 	async def go_forward(self):
 		"""Navigate the agent's tab forward in browser history"""
 		try:
 			page = await self.get_current_page()
-			await page.go_forward(timeout=10, wait_until='domcontentloaded')
+			await page.go_forward(timeout=10_000, wait_until='load')
 		except Exception as e:
 			# Continue even if its not fully loaded, because we wait later for the page to load
 			self.logger.debug(f'⏭️ Error during go_forward: {type(e).__name__}: {e}')
+			# Verify page is still usable after navigation error
+			if 'timeout' in str(e).lower():
+				try:
+					assert await page.evaluate('1'), (
+						f'Page {page.url} crashed after go_forward {type(e).__name__} and can no longer be used via CDP: {e}'
+					)
+				except Exception as eval_error:
+					self.logger.error(f'❌ Page crashed after go_forward timeout: {eval_error}')
 
 	async def close_current_tab(self):
 		"""Close the current tab that the agent is working with.
@@ -2411,9 +3108,11 @@ class BrowserSession(BaseModel):
 		structure = await page.evaluate(debug_script)
 		return structure
 
+	@observe_debug(ignore_output=True)
 	@time_execution_async('--get_state_summary')
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_state_summary(self, cache_clickable_elements_hashes: bool) -> BrowserStateSummary:
+		self.logger.debug('🔄 Starting get_state_summary...')
 		"""Get a summary of the current browser state
 
 		This method builds a BrowserStateSummary object that captures the current state
@@ -2453,29 +3152,119 @@ class BrowserSession(BaseModel):
 
 		return self._cached_browser_state_summary
 
-	async def _get_updated_state(self, focus_element: int = -1) -> BrowserStateSummary:
-		"""Update and return state."""
+	@observe_debug(name='get_minimal_state_summary', ignore_output=True)
+	@require_healthy_browser(usable_page=True, reopen_page=True)
+	@time_execution_async('--get_minimal_state_summary')
+	async def get_minimal_state_summary(self) -> BrowserStateSummary:
+		"""Get basic page info without DOM processing, but try to capture screenshot"""
+		from browser_use.browser.views import BrowserStateSummary
+		from browser_use.dom.views import DOMElementNode
 
 		page = await self.get_current_page()
 
+		# Get basic info - no DOM parsing to avoid errors
+		url = getattr(page, 'url', 'unknown')
+
+		# Try to get title safely
+		try:
+			# timeout after 2 seconds
+			title = await asyncio.wait_for(page.title(), timeout=2.0)
+		except Exception:
+			title = 'Page Load Error'
+
+		# Try to get tabs info safely
+		try:
+			# timeout after 2 seconds
+			tabs_info = await retry(timeout=2, retries=0)(self.get_tabs_info)()
+		except Exception:
+			tabs_info = []
+
+		# Create minimal DOM element for error state
+		minimal_element_tree = DOMElementNode(
+			tag_name='body',
+			xpath='/body',
+			attributes={},
+			children=[],
+			is_visible=True,
+			parent=None,
+		)
+
+		return BrowserStateSummary(
+			element_tree=minimal_element_tree,  # Minimal DOM tree
+			selector_map={},  # Empty selector map
+			url=url,
+			title=title,
+			tabs=tabs_info,
+			pixels_above=0,
+			pixels_below=0,
+			browser_errors=[f'Page state retrieval failed, minimal recovery applied for {url}'],
+		)
+
+	@observe_debug(name='get_updated_state', ignore_output=True)
+	async def _get_updated_state(self, focus_element: int = -1) -> BrowserStateSummary:
+		"""Update and return state."""
+
 		# Check if current page is still valid, if not switch to another available page
+		page = await self.get_current_page()
+
 		try:
 			# Test if page is still accessible
-			await page.evaluate('1')
+			# NOTE: This also happens on invalid urls like www.sadfdsafdssdafd.com
+			await asyncio.wait_for(page.evaluate('1'), timeout=2.5)
 		except Exception as e:
-			self.logger.debug(f'👋 Current page is no longer accessible: {type(e).__name__}: {e}')
-			raise BrowserError('Browser closed: no valid pages available')
+			self.logger.debug(f'👋 Current page is not accessible: {type(e).__name__}: {e}')
+			raise BrowserError('Page is not accessible')
 
 		try:
-			await self.remove_highlights()
-			dom_service = DomService(page, logger=self.logger)
-			content = await dom_service.get_clickable_elements(
-				focus_element=focus_element,
-				viewport_expansion=self.browser_profile.viewport_expansion,
-				highlight_elements=self.browser_profile.highlight_elements,
-			)
+			self.logger.debug('🧹 Removing highlights...')
+			try:
+				await self.remove_highlights()
+			except TimeoutError:
+				self.logger.debug('Timeout to remove highlights')
 
+			# Check for PDF and auto-download if needed
+			try:
+				pdf_path = await self._auto_download_pdf_if_needed(page)
+				if pdf_path:
+					self.logger.info(f'📄 PDF auto-downloaded: {pdf_path}')
+			except Exception as e:
+				self.logger.debug(f'PDF auto-download check failed: {type(e).__name__}: {e}')
+
+			self.logger.debug('🌳 Starting DOM processing...')
+			dom_service = DomService(page, logger=self.logger)
+			try:
+				content = await asyncio.wait_for(
+					dom_service.get_clickable_elements(
+						focus_element=focus_element,
+						viewport_expansion=self.browser_profile.viewport_expansion,
+						highlight_elements=self.browser_profile.highlight_elements,
+					),
+					timeout=45.0,  # 45 second timeout for DOM processing - generous for complex pages
+				)
+				self.logger.debug('✅ DOM processing completed')
+			except TimeoutError:
+				self.logger.warning(f'DOM processing timed out after 45 seconds for {page.url}')
+				self.logger.warning('🔄 Falling back to minimal DOM state to allow basic navigation...')
+
+				# Create minimal DOM state for basic navigation
+				from browser_use.dom.views import DOMElementNode
+
+				minimal_element_tree = DOMElementNode(
+					tag_name='body',
+					xpath='/body',
+					attributes={},
+					children=[],
+					is_visible=True,
+					parent=None,
+				)
+
+				from browser_use.dom.views import DOMState
+
+				content = DOMState(element_tree=minimal_element_tree, selector_map={})
+
+			self.logger.debug('📋 Getting tabs info...')
 			tabs_info = await self.get_tabs_info()
+			self.logger.debug('✅ Tabs info completed')
 
 			# Get all cross-origin iframes within the page and open them in new tabs
 			# mark the titles of the new tabs so the LLM knows to check them for additional content
@@ -2498,20 +3287,51 @@ class BrowserSession(BaseModel):
 			# 		)
 			# 	)
 
-			screenshot_b64 = await self.take_screenshot()
-			pixels_above, pixels_below = await self.get_scroll_info(page)
+			try:
+				self.logger.debug('📸 Capturing screenshot...')
+				# Reasonable timeout for screenshot
+				screenshot_b64 = await self.take_screenshot()
+				# self.logger.debug('✅ Screenshot completed')
+			except Exception as e:
+				self.logger.warning(f'❌ Screenshot failed for {_log_pretty_url(page.url)}: {type(e).__name__} {e}')
+				screenshot_b64 = None
+
+			# Get comprehensive page information
+			page_info = await self.get_page_info(page)
+			try:
+				self.logger.debug('📏 Getting scroll info...')
+				pixels_above, pixels_below = await asyncio.wait_for(self.get_scroll_info(page), timeout=5.0)
+				self.logger.debug('✅ Scroll info completed')
+			except Exception as e:
+				self.logger.warning(f'Failed to get scroll info: {type(e).__name__}')
+				pixels_above, pixels_below = 0, 0
+
+			try:
+				title = await asyncio.wait_for(page.title(), timeout=3.0)
+			except Exception:
+				title = 'Title unavailable'
+
+			# Check if this is a minimal fallback state
+			browser_errors = []
+			if not content.selector_map:  # Empty selector map indicates fallback state
+				browser_errors.append(
+					f'DOM processing timed out for {page.url} - using minimal state. Basic navigation still available via go_to_url, scroll, and search actions.'
+				)
 
 			self.browser_state_summary = BrowserStateSummary(
 				element_tree=content.element_tree,
 				selector_map=content.selector_map,
 				url=page.url,
-				title=await page.title(),
+				title=title,
 				tabs=tabs_info,
 				screenshot=screenshot_b64,
+				page_info=page_info,
 				pixels_above=pixels_above,
 				pixels_below=pixels_below,
+				browser_errors=browser_errors,
 			)
 
+			self.logger.debug('✅ get_state_summary completed successfully')
 			return self.browser_state_summary
 		except Exception as e:
 			self.logger.error(f'❌ Failed to update browser_state_summary: {type(e).__name__}: {e}')
@@ -2520,101 +3340,340 @@ class BrowserSession(BaseModel):
 				return self.browser_state_summary
 			raise
 
+	# region - Page Health Check Helpers
+
+	async def _is_page_responsive(self, page: Page, timeout: float = 5.0) -> bool:
+		"""Check if a page is responsive by trying to evaluate simple JavaScript."""
+		eval_task = None
+		try:
+			eval_task = asyncio.create_task(page.evaluate('1'))
+			done, pending = await asyncio.wait([eval_task], timeout=timeout)
+
+			if eval_task in done:
+				try:
+					await eval_task  # This will raise if the evaluation failed
+					return True
+				except Exception:
+					return False
+			else:
+				# Timeout - the page is unresponsive
+				return False
+		except Exception:
+			return False
+		finally:
+			# Always clean up the eval task
+			if eval_task and not eval_task.done():
+				eval_task.cancel()
+				try:
+					await eval_task
+				except (asyncio.CancelledError, Exception):
+					pass
+
+	async def _force_close_page_via_cdp(self, page_url: str) -> bool:
+		"""Force close a crashed page using CDP from a clean temporary page."""
+		try:
+			# self.logger.info('🔨 Creating temporary page for CDP force-close...')
+
+			# Create a clean page for CDP operations
+			assert self.browser_context, 'Browser context is not set up yet'
+			temp_page = await asyncio.wait_for(self.browser_context.new_page(), timeout=5.0)
+			await asyncio.wait_for(temp_page.goto('about:blank'), timeout=2.0)
+
+			# Create CDP session from the clean page
+			cdp_session = await asyncio.wait_for(self.browser_context.new_cdp_session(temp_page), timeout=5.0)  # type: ignore
+
+			try:
+				# Get all browser targets
+				targets = await asyncio.wait_for(cdp_session.send('Target.getTargets'), timeout=2.0)
+
+				# Find the crashed page target
+				blocked_target_id = None
+				for target in targets.get('targetInfos', []):
+					if target.get('type') == 'page' and target.get('url') == page_url:
+						blocked_target_id = target.get('targetId')
+						# self.logger.debug(f'Found target to close: {page_url}')
+						break
+
+				if blocked_target_id:
+					# Force close the target
+					self.logger.warning(
+						f'🪓 Force-closing crashed page target_id={blocked_target_id} via CDP: {_log_pretty_url(page_url)}...'
+					)
+					await asyncio.wait_for(cdp_session.send('Target.closeTarget', {'targetId': blocked_target_id}), timeout=2.0)
+					# self.logger.debug(f'☠️ Successfully force-closed crashed page target_id={blocked_target_id} via CDP: {_log_pretty_url(page_url)}')
+					return True
+				else:
+					self.logger.debug(
+						f'❌ Could not find CDP page target_id to force-close: {_log_pretty_url(page_url)} (concurrency issues?)'
+					)
+					return False
+
+			finally:
+				# Clean up
+				try:
+					await asyncio.wait_for(cdp_session.detach(), timeout=1.0)
+				except Exception:
+					pass
+				await temp_page.close()
+
+		except Exception as e:
+			self.logger.error(f'❌ Using raw CDP to force-close crashed page failed: {type(e).__name__}: {e}')
+			return False
+
+	async def _try_reopen_url(self, url: str, timeout_ms: int | None = None) -> bool:
+		"""Try to reopen a URL in a new page and check if it's responsive."""
+		if not url or is_new_tab_page(url):
+			return False
+
+		timeout_ms = int(timeout_ms or self.browser_profile.default_navigation_timeout or 6000)
+
+		try:
+			self.logger.debug(f'🔄 Attempting to reload URL that crashed: {_log_pretty_url(url)}')
+
+			# Create new page directly to avoid circular dependency
+			assert self.browser_context is not None, 'Browser context is not set'
+			new_page = await self.browser_context.new_page()
+			self.agent_current_page = new_page
+
+			# Update human tab reference if there is no human tab yet
+			if (not self.human_current_page) or self.human_current_page.is_closed():
+				self.human_current_page = new_page
+
+			# Set viewport for new tab
+			if self.browser_profile.viewport:
+				await new_page.set_viewport_size(self.browser_profile.viewport)
+
+			# Navigate with timeout using asyncio.wait
+			nav_task = asyncio.create_task(new_page.goto(url, wait_until='load', timeout=timeout_ms))
+			done, pending = await asyncio.wait([nav_task], timeout=(timeout_ms + 500) / 1000)
+
+			if nav_task in pending:
+				# Navigation timed out
+				self.logger.debug(
+					f'⚠️ Attempting to reload previously crashed URL {_log_pretty_url(url)} failed again, timed out again after {timeout_ms / 1000}s'
+				)
+				nav_task.cancel()
+				try:
+					await nav_task
+				except asyncio.CancelledError:
+					pass
+			elif nav_task in done:
+				try:
+					await nav_task  # This will raise if navigation failed
+				except Exception as e:
+					self.logger.debug(
+						f'⚠️ Attempting to reload previously crashed URL {_log_pretty_url(url)} failed again: {type(e).__name__}'
+					)
+
+			# Wait a bit for any transient blocking to resolve
+			await asyncio.sleep(1.0)
+
+			# Check if the reopened page is responsive
+			# self.logger.debug('Checking if reopened page is responsive...')
+			is_responsive = await self._is_page_responsive(new_page, timeout=2.0)
+
+			if is_responsive:
+				self.logger.info(f'✅ Page recovered and is now responsive after reopening on: {_log_pretty_url(url)}')
+				return True
+			else:
+				self.logger.warning(f'⚠️ Reopened page {_log_pretty_url(url)} is still unresponsive')
+				# Close the unresponsive page before returning
+				# This is critical to prevent the recovery flow from hanging
+				try:
+					await self._force_close_page_via_cdp(new_page.url)
+				except Exception as e:
+					self.logger.error(
+						f'❌ Failed to close crashed page {_log_pretty_url(url)} via CDP: {type(e).__name__}: {e} (something is very wrong or system is extremely overloaded)'
+					)
+				self.agent_current_page = None  # Clear reference to closed page
+				return False
+
+		except Exception as e:
+			self.logger.error(f'❌ Retrying crashed page {_log_pretty_url(url)} failed: {type(e).__name__}: {e}')
+			return False
+
+	async def _create_blank_fallback_page(self, url: str) -> None:
+		"""Create a new blank page as a fallback when recovery fails."""
+		self.logger.warning(
+			f'⚠️ Resetting to about:blank as fallback because browser is unable to load the original URL without crashing: {_log_pretty_url(url)}'
+		)
+		# self.logger.debug(f'Current agent_current_page: {self.agent_current_page}')
+
+		# Close any existing broken page
+		if self.agent_current_page and not self.agent_current_page.is_closed():
+			try:
+				await self.agent_current_page.close()
+			except Exception:
+				pass
+
+		# Create fresh page directly (avoid decorated methods to prevent circular dependency)
+		assert self.browser_context is not None, 'Browser context is not set'
+		new_page = await self.browser_context.new_page()
+		self.agent_current_page = new_page
+
+		# Update human tab reference if there is no human tab yet
+		if (not self.human_current_page) or self.human_current_page.is_closed():
+			self.human_current_page = new_page
+
+		# Set viewport for new tab
+		if self.browser_profile.viewport:
+			await new_page.set_viewport_size(self.browser_profile.viewport)
+
+		# Navigate to blank
+		try:
+			await new_page.goto('about:blank', wait_until='load', timeout=5000)
+		except Exception as e:
+			self.logger.error(
+				f'❌ Failed to navigate to about:blank: {type(e).__name__}: {e} (something is very wrong or system is extremely overloaded)'
+			)
+			raise
+
+		# Verify it's responsive
+		if not await self._is_page_responsive(new_page, timeout=1.0):
+			raise BrowserError(
+				'Browser is unable to load any new about:blank pages (something is very wrong or browser is extremely overloaded)'
+			)
+
+	async def _recover_unresponsive_page(self, calling_method: str, timeout_ms: int | None = None) -> None:
+		"""Recover from an unresponsive page by closing and reopening it."""
+		self.logger.warning(f'⚠️ Page JS engine became unresponsive in {calling_method}(), attempting recovery...')
+		timeout_ms = min(3000, int(timeout_ms or self.browser_profile.default_navigation_timeout or 5000))
+
+		# Prevent re-entrance
+		self._in_recovery = True
+		try:
+			# Get current URL before recovery
+			assert self.agent_current_page, 'Agent current page is not set'
+			current_url = self.agent_current_page.url
+			# self.logger.debug(f'Current URL: {current_url}')
+
+			# Clear page references
+			blocked_page = self.agent_current_page
+			self.agent_current_page = None
+			if blocked_page == self.human_current_page:
+				self.human_current_page = None
+
+			# Force-close the crashed page via CDP
+			self.logger.debug('🪓 Page Recovery Step 1/3: Force-closing crashed page via CDP...')
+			await self._force_close_page_via_cdp(current_url)
+
+			# Remove the closed page from browser_context.pages by forcing a refresh
+			# This prevents TargetClosedError when iterating through pages later
+			if self.browser_context and self.browser_context.pages:
+				# Additional cleanup: close any page objects that have the same url as the crashed page
+				# (could close too many pages by accident if we have a few different tabs on the same URL)
+				# Sometimes playwright doesn't immediately remove force-closed pages from the list
+				for page in self.browser_context.pages[:]:  # Use slice to avoid modifying list during iteration
+					if page.url == current_url and not page.is_closed() and not is_new_tab_page(page.url):
+						try:
+							# Try to close it via playwright as well
+							await page.close()
+							self.logger.debug(
+								f'🪓 Closed 🅟 {str(id(page))[-2:]} because it has a known crash-causing URL: {_log_pretty_url(page.url)}'
+							)
+						except Exception:
+							pass  # Page might already be closed via CDP
+
+			# Try to reopen the URL (in case blocking was transient)
+			self.logger.debug('🍼 Page Recovery Step 2/3: Trying to reopen the URL again...')
+			if await self._try_reopen_url(current_url, timeout_ms=timeout_ms):
+				self.logger.debug('✅ Page Recovery Step 3/3: Page loading succeeded after 2nd attempt!')
+				return  # Success!
+
+			# If that failed, fall back to blank page
+			self.logger.debug(
+				'❌ Page Recovery Step 3/3: Loading the page a 2nd time failed as well, browser seems unable to load this URL without getting stuck, retreating to a safe page...'
+			)
+			await self._create_blank_fallback_page(current_url)
+
+		finally:
+			# Always clear recovery flag
+			self._in_recovery = False
+
 	# region - Browser Actions
-	@require_initialization
+	@observe_debug(name='take_screenshot', ignore_output=True)
+	@retry(
+		retries=1,  # try up to 1 time to take the screenshot (2 total attempts)
+		timeout=30,  # allow up to 30s for each attempt (includes recovery time)
+		wait=1,  # wait 1s between each attempt
+		semaphore_limit=2,  # Allow 2 screenshots at a time to better utilize resources
+		semaphore_name='screenshot_global',
+		semaphore_scope='multiprocess',
+		semaphore_lax=True,  # Continue without semaphore if it can't be acquired
+		semaphore_timeout=15,  # Wait up to 15s for semaphore acquisition
+	)
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--take_screenshot')
-	async def take_screenshot(self, full_page: bool = False) -> str:
+	async def take_screenshot(self, full_page: bool = False) -> str | None:
 		"""
-		Returns a base64 encoded screenshot of the current page.
+		Returns a base64 encoded screenshot of the current page using CDP.
+
+		The decorator order ensures:
+		1. @retry runs first (outer decorator)
+		2. @require_healthy_browser runs on each retry attempt
+		3. Page responsiveness is checked before each screenshot attempt
+		4. If page is unresponsive, it's recovered and the method is retried
 		"""
 		assert self.agent_current_page is not None, 'Agent current page is not set'
+		assert self.browser_context, 'Browser context is not set'
 
-		page = await self.get_current_page()
+		page = self.agent_current_page
+
+		if is_new_tab_page(page.url):
+			self.logger.warning(
+				f'▫️ Sending LLM 1px placeholder instead of real screenshot of: {_log_pretty_url(page.url)} (page empty)'
+			)
+			# not an exception because there's no point in retrying if we hit this, its always pointless to screenshot about:blank
+			# raise ValueError('Refusing to take unneeded screenshot of empty new tab page')
+			# return a 1px*1px white png to avoid wasting tokens
+			return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='
+
+		# Always bring page to front before rendering, otherwise it crashes in some cases, not sure why
 		try:
-			await page.wait_for_load_state(
-				timeout=5000,
-			)  # page has already loaded by this point, this is extra for previous action animations/frame loads to settle
+			await page.bring_to_front()
 		except Exception:
 			pass
 
-		# 0. Attempt full-page screenshot (sometimes times out for huge pages)
-		if full_page:
-			try:
-				screenshot = await asyncio.wait_for(
-					page.screenshot(
-						full_page=True,
-						scale='css',
-						timeout=10000,
-						animations='allow',
-						caret='initial',
-					),
-					timeout=15000,
-				)
-
-				screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
-				return screenshot_b64
-			except Exception as e:
-				self.logger.warning(
-					f'⚠️ Failed to take full-page screenshot after 10s: {type(e).__name__}: {e} trying with height limit instead...'
-				)
-
-		# Fallback method: manually expand the viewport and take a screenshot of the entire viewport
-
-		# 1. Get current page dimensions
-		dimensions = await page.evaluate("""() => {
-			return {
-				width: window.innerWidth,
-				height: window.innerHeight,
-				devicePixelRatio: window.devicePixelRatio || 1
-			};
-		}""")
-
-		# 2. Save current viewport state and calculate expanded dimensions
-		original_viewport = page.viewport_size
-		viewport_expansion = self.browser_profile.viewport_expansion if self.browser_profile.viewport_expansion else 0
-
-		expanded_width = dimensions['width']  # Keep width unchanged
-		expanded_height = dimensions['height'] + viewport_expansion
-
-		# 3. Expand the viewport if we are using one
-		if original_viewport:
-			await asyncio.wait_for(
-				page.set_viewport_size({'width': expanded_width, 'height': expanded_height}), timeout=2000
-			)  # intentionally set short because we want this to be noisy if it's slowing us down
-
+		# Take screenshot using CDP to get around playwright's unnecessary slowness and weird behavior
+		cdp_session = None
 		try:
-			# 4. Take full-viewport screenshot
-			screenshot = await asyncio.wait_for(
-				page.screenshot(
-					full_page=False,
-					scale='css',
-					timeout=10000,
-					clip={'x': 0, 'y': 0, 'width': expanded_width, 'height': expanded_height},
-					animations='allow',
-					caret='initial',
-					# animations='disabled',   # these can cause CSP errors on some pages, leading to a red herring "waiting for fonts to load" error
-				),
-				timeout=15000,
+			# Create CDP session for the screenshot
+			self.logger.debug(
+				f'📸 Taking viewport-only PNG screenshot of page via fresh CDP session: {_log_pretty_url(page.url)}'
 			)
-			# TODO: manually take multiple clipped screenshots to capture the full height and stitch them together?
+			cdp_session = await self.browser_context.new_cdp_session(page)  # type: ignore
 
-			screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+			# Capture screenshot via CDP
+			screenshot_response = await cdp_session.send(
+				'Page.captureScreenshot',
+				{
+					'captureBeyondViewport': False,
+					'fromSurface': True,
+					'format': 'png',
+				},
+			)
+
+			screenshot_b64 = screenshot_response.get('data')
+			if not screenshot_b64:
+				raise Exception(
+					f'CDP returned empty screenshot data for page {_log_pretty_url(page.url)}? (expected png base64)'
+				)  # have never seen this happen in practice
+
 			return screenshot_b64
-		except Exception as e:
-			self.logger.error(f'❌ Failed to take full-page screenshot after 2 tries: {type(e).__name__}: {e}')
-			raise
 
-		finally:
-			# 5. Restore original viewport state if we expanded it
-			if original_viewport:
-				# Viewport was originally enabled, restore to original dimensions
-				await asyncio.wait_for(
-					page.set_viewport_size(original_viewport), timeout=2000
-				)  # intentionally set short because we want this to be noisy if it's slowing us down
+		except Exception as err:
+			error_str = f'{type(err).__name__}: {err}'
+			if 'timeout' in error_str.lower():
+				self.logger.warning(f'⏱️ Screenshot timed out on page {_log_pretty_url(page.url)} (possibly crashed): {error_str}')
 			else:
-				# Viewport was originally disabled, no need to restore it
-				# await page.set_viewport_size(None)  # unfortunately this is not supported by playwright
-				pass
+				self.logger.error(f'❌ Screenshot failed on page {_log_pretty_url(page.url)} (possibly crashed): {error_str}')
+			raise
+		finally:
+			if cdp_session:
+				try:
+					await asyncio.wait_for(cdp_session.detach(), timeout=1.0)
+				except Exception:
+					pass
 
 	# region - User Actions
 
@@ -2810,7 +3869,7 @@ class BrowserSession(BaseModel):
 			tag_name = element.tag_name or '*'
 			return f"{tag_name}[highlight_index='{element.highlight_index}']"
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--is_visible')
 	async def _is_visible(self, element: ElementHandle) -> bool:
 		"""
@@ -2826,7 +3885,7 @@ class BrowserSession(BaseModel):
 
 		return not is_hidden and bbox is not None and bbox['width'] > 0 and bbox['height'] > 0
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--get_locate_element')
 	async def get_locate_element(self, element: DOMElementNode) -> ElementHandle | None:
 		page = await self.get_current_page()
@@ -2910,7 +3969,7 @@ class BrowserSession(BaseModel):
 				)
 				return None
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--get_locate_element_by_xpath')
 	async def get_locate_element_by_xpath(self, xpath: str) -> ElementHandle | None:
 		"""
@@ -2931,7 +3990,7 @@ class BrowserSession(BaseModel):
 			self.logger.error(f'❌ Failed to locate xpath {xpath} on page {_log_pretty_url(page.url)}: {type(e).__name__}: {e}')
 			return None
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--get_locate_element_by_css_selector')
 	async def get_locate_element_by_css_selector(self, css_selector: str) -> ElementHandle | None:
 		"""
@@ -2954,7 +4013,7 @@ class BrowserSession(BaseModel):
 			)
 			return None
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--get_locate_element_by_text')
 	async def get_locate_element_by_text(
 		self, text: str, nth: int | None = 0, element_type: str | None = None
@@ -2997,7 +4056,7 @@ class BrowserSession(BaseModel):
 			)
 			return None
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--input_text_element_node')
 	async def _input_text_element_node(self, element_node: DOMElementNode, text: str):
 		"""
@@ -3012,10 +4071,10 @@ class BrowserSession(BaseModel):
 
 			# Ensure element is ready for input
 			try:
-				await element_handle.wait_for_element_state('stable', timeout=1000)
+				await element_handle.wait_for_element_state('stable', timeout=1_000)
 				is_visible = await self._is_visible(element_handle)
 				if is_visible:
-					await element_handle.scroll_into_view_if_needed(timeout=1000)
+					await element_handle.scroll_into_view_if_needed(timeout=1_000)
 			except Exception:
 				pass
 
@@ -3064,7 +4123,7 @@ class BrowserSession(BaseModel):
 			)
 			raise BrowserError(f'Failed to input text into index {element_node.highlight_index}')
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	@time_execution_async('--switch_to_tab')
 	async def switch_to_tab(self, page_id: int) -> Page:
 		"""Switch to a specific tab by its page_id (aka tab index exposed to LLM)"""
@@ -3082,6 +4141,7 @@ class BrowserSession(BaseModel):
 
 		# Update both tab references - agent wants this tab, and it's now in the foreground
 		self.agent_current_page = page
+		await self.agent_current_page.bring_to_front()  # crucial for screenshot to work
 
 		# in order for a human watching to be able to follow along with what the agent is doing
 		# update the human's active tab to match the agent's
@@ -3092,6 +4152,11 @@ class BrowserSession(BaseModel):
 			pass
 
 		self.human_current_page = page
+
+		# Invalidate cached state since we've switched to a different tab
+		# The cached state contains DOM elements and selector map from the previous tab
+		self._cached_browser_state_summary = None
+		self._cached_clickable_element_hashes = None
 
 		try:
 			await page.wait_for_load_state()
@@ -3104,100 +4169,22 @@ class BrowserSession(BaseModel):
 
 		return page
 
-	@time_execution_async('--create_new_tab')
-	async def create_new_tab(self, url: str | None = None) -> Page:
-		"""Create a new tab and optionally navigate to a URL"""
-
-		# Add https:// if there's no protocol
-		normalized_url = url
-		if url:
-			normalized_url = normalize_url(url)
-
-			if not self._is_url_allowed(normalized_url):
-				raise BrowserError(f'Cannot create new tab with non-allowed URL: {normalized_url}')
-
-		try:
-			assert self.browser_context is not None, 'Browser context is not set'
-			new_page = await self.browser_context.new_page()
-		except Exception:
-			self.initialized = False
-
-		if not self.initialized or not self.browser_context:
-			# If we were initialized but lost connection, reset state first to avoid infinite loops
-			if self.initialized and not self.browser_context:
-				self.logger.warning(
-					f'💔 Browser {self._connection_str} disconnected while trying to create a new tab, reconnecting...'
-				)
-				self._reset_connection_state()
-			await self.start()
-			assert self.browser_context, 'Browser context is not set'
-			new_page = await self.browser_context.new_page()
-
-		# Update agent tab reference
-		self.agent_current_page = new_page
-
-		# Update human tab reference if there is no human tab yet
-		if (not self.human_current_page) or self.human_current_page.is_closed():
-			self.human_current_page = new_page
-
-		tab_idx = self.tabs.index(new_page)
-		try:
-			await new_page.wait_for_load_state()
-		except Exception as e:
-			self.logger.warning(
-				f'⚠️ New page [{tab_idx}]{_log_pretty_url(new_page.url)} failed to fully load: {type(e).__name__}: {e}'
-			)
-
-		# Set the viewport size for the new tab
-		if self.browser_profile.viewport:
-			await new_page.set_viewport_size(self.browser_profile.viewport)
-
-		if normalized_url:
-			try:
-				await new_page.goto(normalized_url, wait_until='domcontentloaded')
-				await self._wait_for_page_and_frames_load(timeout_overwrite=1)
-			except Exception as e:
-				self.logger.error(f'❌ Error navigating to {normalized_url}: {type(e).__name__}: {e} (proceeding anyway...)')
-
-		assert self.human_current_page is not None
-		assert self.agent_current_page is not None
-		# if url:  # sometimes this does not pass because JS or HTTP redirects the page really fast
-		# 	assert self.agent_current_page.url == url
-		# else:
-		# 	assert self.agent_current_page.url == 'about:blank'
-
-		# if there are any unused about:blank tabs after we open a new tab, close them to clean up unused tabs
-		assert self.browser_context is not None, 'Browser context is not set'
-		# hacky way to be sure we only close our own tabs, check the title of the tab for our BrowserSession name
-		title_of_our_setup_tab = f'Setting up #{str(self.id)[-4:]}...'  # set up by self._show_dvd_screensaver_loading_animation()
-		for page in self.browser_context.pages:
-			page_title = await page.title()
-			if page.url == 'about:blank' and page != self.agent_current_page and page_title == title_of_our_setup_tab:
-				await page.close()
-				self.human_current_page = (  # in case we just closed the human's tab, fix the refs
-					self.human_current_page if not self.human_current_page.is_closed() else self.agent_current_page
-				)
-				break  # only close a maximum of one unused about:blank tab,
-				# if multiple parallel agents share one BrowserSession
-				# closing every new_page() tab (which start on about:blank) causes lots of problems
-				# (the title check is not enough when they share a single BrowserSession)
-
-		return new_page
-
 	# region - Helper methods for easier access to the DOM
-
-	@require_initialization
+	@observe_debug(name='get_selector_map')
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_selector_map(self) -> SelectorMap:
 		if self._cached_browser_state_summary is None:
 			return {}
 		return self._cached_browser_state_summary.selector_map
 
-	@require_initialization
+	@observe_debug(name='get_element_by_index')
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_element_by_index(self, index: int) -> ElementHandle | None:
 		selector_map = await self.get_selector_map()
 		element_handle = await self.get_locate_element(selector_map[index])
 		return element_handle
 
+	@observe_debug(name='is_file_input_by_index')
 	async def is_file_input_by_index(self, index: int) -> bool:
 		try:
 			selector_map = await self.get_selector_map()
@@ -3215,7 +4202,7 @@ class BrowserSession(BaseModel):
 			and node.attributes.get('type', '').lower() == 'file'
 		)
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def find_file_upload_element_by_index(
 		self, index: int, max_height: int = 3, max_descendant_depth: int = 3
 	) -> DOMElementNode | None:
@@ -3276,18 +4263,162 @@ class BrowserSession(BaseModel):
 			)
 			return None
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_scroll_info(self, page: Page) -> tuple[int, int]:
 		"""Get scroll position information for the current page."""
 		scroll_y = await page.evaluate('window.scrollY')
 		viewport_height = await page.evaluate('window.innerHeight')
 		total_height = await page.evaluate('document.documentElement.scrollHeight')
-		pixels_above = scroll_y
-		pixels_below = total_height - (scroll_y + viewport_height)
+		# Convert to int to handle fractional pixels
+		pixels_above = int(scroll_y)
+		pixels_below = int(max(0, total_height - (scroll_y + viewport_height)))
 		return pixels_above, pixels_below
 
-	@require_initialization
+	@require_healthy_browser(usable_page=True, reopen_page=True)
+	async def get_page_info(self, page: Page) -> PageInfo:
+		"""Get comprehensive page size and scroll information."""
+		# Get all page dimensions and scroll info in one JavaScript call for efficiency
+		page_data = await page.evaluate("""() => {
+			return {
+				// Current viewport dimensions
+				viewport_width: window.innerWidth,
+				viewport_height: window.innerHeight,
+				
+				// Total page dimensions
+				page_width: Math.max(
+					document.documentElement.scrollWidth,
+					document.body.scrollWidth || 0
+				),
+				page_height: Math.max(
+					document.documentElement.scrollHeight,
+					document.body.scrollHeight || 0
+				),
+				
+				// Current scroll position
+				scroll_x: window.scrollX || window.pageXOffset || document.documentElement.scrollLeft || 0,
+				scroll_y: window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0
+			};
+		}""")
+
+		# Calculate derived values (convert to int to handle fractional pixels)
+		viewport_width = int(page_data['viewport_width'])
+		viewport_height = int(page_data['viewport_height'])
+		page_width = int(page_data['page_width'])
+		page_height = int(page_data['page_height'])
+		scroll_x = int(page_data['scroll_x'])
+		scroll_y = int(page_data['scroll_y'])
+
+		# Calculate scroll information
+		pixels_above = scroll_y
+		pixels_below = max(0, page_height - (scroll_y + viewport_height))
+		pixels_left = scroll_x
+		pixels_right = max(0, page_width - (scroll_x + viewport_width))
+
+		# Create PageInfo object with comprehensive information
+		page_info = PageInfo(
+			viewport_width=viewport_width,
+			viewport_height=viewport_height,
+			page_width=page_width,
+			page_height=page_height,
+			scroll_x=scroll_x,
+			scroll_y=scroll_y,
+			pixels_above=pixels_above,
+			pixels_below=pixels_below,
+			pixels_left=pixels_left,
+			pixels_right=pixels_right,
+		)
+
+		return page_info
+
+	async def _scroll_with_cdp_gesture(self, page: Page, pixels: int) -> bool:
+		"""
+		Scroll using CDP Input.synthesizeScrollGesture for universal compatibility.
+
+		Args:
+			page: The page to scroll
+			pixels: Number of pixels to scroll (positive = up, negative = down)
+
+		Returns:
+			True if successful, False if failed
+		"""
+		try:
+			# Use CDP to synthesize scroll gesture - works in all contexts including PDFs
+			cdp_session = await page.context.new_cdp_session(page)  # type: ignore
+
+			# Get viewport center for scroll origin
+			viewport = await page.evaluate("""
+				() => ({
+					width: window.innerWidth,
+					height: window.innerHeight
+				})
+			""")
+
+			center_x = viewport['width'] // 2
+			center_y = viewport['height'] // 2
+
+			await cdp_session.send(
+				'Input.synthesizeScrollGesture',
+				{
+					'x': center_x,
+					'y': center_y,
+					'xDistance': 0,
+					'yDistance': -pixels,  # Negative = scroll down, Positive = scroll up
+					'gestureSourceType': 'mouse',  # Use mouse gestures for better compatibility
+					'speed': 3000,  # Pixels per second
+				},
+			)
+
+			try:
+				await asyncio.wait_for(cdp_session.detach(), timeout=1.0)
+			except (TimeoutError, Exception):
+				pass
+			self.logger.debug(f'📄 Scrolled via CDP Input.synthesizeScrollGesture: {pixels}px')
+			return True
+
+		except Exception as e:
+			self.logger.warning(f'❌ Scrolling via CDP Input.synthesizeScrollGesture failed: {type(e).__name__}: {e}')
+			return False
+
+	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def _scroll_container(self, pixels: int) -> None:
+		"""Scroll using CDP gesture synthesis with JavaScript fallback."""
+
+		page = await self.get_current_page()
+
+		# Try CDP scroll gesture first (works universally including PDFs)
+		if await self._scroll_with_cdp_gesture(page, pixels):
+			return
+
+		# Fallback to JavaScript for older browsers or when CDP fails
+		self.logger.debug('Falling back to JavaScript scrolling')
+		SMART_SCROLL_JS = """(dy) => {
+			const bigEnough = el => el.clientHeight >= window.innerHeight * 0.5;
+			const canScroll = el =>
+				el &&
+				/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
+				el.scrollHeight > el.clientHeight &&
+				bigEnough(el);
+
+			let el = document.activeElement;
+			while (el && !canScroll(el) && el !== document.body) el = el.parentElement;
+
+			el = canScroll(el)
+					? el
+					: [...document.querySelectorAll('*')].find(canScroll)
+					|| document.scrollingElement
+					|| document.documentElement;
+
+			if (el === document.scrollingElement ||
+				el === document.documentElement ||
+				el === document.body) {
+				window.scrollBy(0, dy);
+			} else {
+				el.scrollBy({ top: dy, behavior: 'auto' });
+			}
+		}"""
+		await page.evaluate(SMART_SCROLL_JS, pixels)
+
+		# BUGOWL: If above scroll doesn't work then scroll in the center of the screen.
 		SMART_SCROLL_CENTER_JS = """
 		(dy) => {
 			const x = window.innerWidth / 2;
@@ -3312,8 +4443,7 @@ class BrowserSession(BaseModel):
 			}
 		}
 		"""
-		page = await self.get_current_page()
-		await page.evaluate(SMART_SCROLL_CENTER_JS, pixels)
+		await page.evaluate(SMART_SCROLL_JS, pixels)
 
 	# --- DVD Screensaver Loading Animation Helper ---
 	async def _show_dvd_screensaver_loading_animation(self, page: Page) -> None:
@@ -3325,97 +4455,357 @@ class BrowserSession(BaseModel):
 			# dont bother wasting CPU showing animations during evals
 			return
 
-		# we could enforce this, but maybe it's useful to be able to show it on other tabs?
-		# assert page.url == 'about:blank', 'DVD screensaver loading animation should only be shown on about:blank tabs'
+		# assert is_new_tab_page(page.url), 'DVD screensaver loading animation should only be shown on new tab pages'
 
 		# all in one JS function for speed, we want as few roundtrip CDP calls as possible
 		# between opening the tab and showing the animation
-		await page.evaluate(
-			"""(browser_session_label) => {
-			const animated_title = `Setting up #${browser_session_label}...`;
-			if (document.title === animated_title) {
-				return;      // already run on this tab, dont run again
-			}
-			document.title = animated_title;
-
-			// Create the main overlay
-			const loadingOverlay = document.createElement('div');
-			loadingOverlay.id = 'pretty-loading-animation';
-			loadingOverlay.style.position = 'fixed';
-			loadingOverlay.style.top = '0';
-			loadingOverlay.style.left = '0';
-			loadingOverlay.style.width = '100vw';
-			loadingOverlay.style.height = '100vh';
-			loadingOverlay.style.background = '#fff';
-			loadingOverlay.style.zIndex = '99999';
-			loadingOverlay.style.overflow = 'hidden';
-
-			// Create the image element
-			const img = document.createElement('img');
-			img.src = 'https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
-			img.alt = 'Browser-Use';
-			img.style.width = '200px';
-			img.style.height = 'auto';
-			img.style.position = 'absolute';
-			img.style.left = '0px';
-			img.style.top = '0px';
-			img.style.zIndex = '2';
-			img.style.opacity = '0.8';
-
-			loadingOverlay.appendChild(img);
-			document.body.appendChild(loadingOverlay);
-
-			// DVD screensaver bounce logic
-			let x = Math.random() * (window.innerWidth - 300);
-			let y = Math.random() * (window.innerHeight - 300);
-			let dx = 1.2 + Math.random() * 0.4; // px per frame
-			let dy = 1.2 + Math.random() * 0.4;
-			// Randomize direction
-			if (Math.random() > 0.5) dx = -dx;
-			if (Math.random() > 0.5) dy = -dy;
-
-			x = window.innerWidth / 2;
-			y = 100;
-			dy = 0;  // vertical velocity
-			const gravity = 0.2;
-			const damping = 0.8;
-
-			// Add this at the top with other variables
-			let angle = 0;
-			const radius = 100;
-			const centerX = window.innerWidth / 2;
-			const centerY = window.innerHeight / 2;
-
-			function animate() {
-				angle += 0.01;
-				x = centerX + Math.cos(angle) * radius - img.offsetWidth/2;
-				y = centerY + Math.sin(angle) * radius - img.offsetHeight/2;
-				
-				img.style.left = `${x}px`;
-				img.style.top = `${y}px`;
-				requestAnimationFrame(animate);
-			}
-
-			animate();
-
-			// Responsive: update bounds on resize
-			window.addEventListener('resize', () => {
-				x = Math.min(x, window.innerWidth - img.offsetWidth);
-				y = Math.min(y, window.innerHeight - img.offsetHeight);
-			});
-
-			// Add a little CSS for smoothness
-			const style = document.createElement('style');
-			style.innerHTML = `
-				#pretty-loading-animation {
-					/*backdrop-filter: blur(2px) brightness(0.9);*/
+		try:
+			await page.evaluate(
+				"""(browser_session_label) => {
+				const animated_title = `Starting agent ${browser_session_label}...`;
+				if (document.title === animated_title) {
+					return;      // already run on this tab, dont run again
 				}
-				#pretty-loading-animation img {
-					user-select: none;
-					pointer-events: none;
+				document.title = animated_title;
+
+				// Create the main overlay
+				const loadingOverlay = document.createElement('div');
+				loadingOverlay.id = 'pretty-loading-animation';
+				loadingOverlay.style.position = 'fixed';
+				loadingOverlay.style.top = '0';
+				loadingOverlay.style.left = '0';
+				loadingOverlay.style.width = '100vw';
+				loadingOverlay.style.height = '100vh';
+				loadingOverlay.style.background = '#000';
+				loadingOverlay.style.zIndex = '99999';
+				loadingOverlay.style.overflow = 'hidden';
+
+				// Create the image element
+				const img = document.createElement('img');
+				img.src = 'https://cf.browser-use.com/logo.svg';
+				img.alt = 'Browser-Use';
+				img.style.width = '200px';
+				img.style.height = 'auto';
+				img.style.position = 'absolute';
+				img.style.left = '0px';
+				img.style.top = '0px';
+				img.style.zIndex = '2';
+				img.style.opacity = '0.8';
+
+				loadingOverlay.appendChild(img);
+				document.body.appendChild(loadingOverlay);
+
+				// DVD screensaver bounce logic
+				let x = Math.random() * (window.innerWidth - 300);
+				let y = Math.random() * (window.innerHeight - 300);
+				let dx = 1.2 + Math.random() * 0.4; // px per frame
+				let dy = 1.2 + Math.random() * 0.4;
+				// Randomize direction
+				if (Math.random() > 0.5) dx = -dx;
+				if (Math.random() > 0.5) dy = -dy;
+
+				function animate() {
+					const imgWidth = img.offsetWidth || 300;
+					const imgHeight = img.offsetHeight || 300;
+					x += dx;
+					y += dy;
+
+					if (x <= 0) {
+						x = 0;
+						dx = Math.abs(dx);
+					} else if (x + imgWidth >= window.innerWidth) {
+						x = window.innerWidth - imgWidth;
+						dx = -Math.abs(dx);
+					}
+					if (y <= 0) {
+						y = 0;
+						dy = Math.abs(dy);
+					} else if (y + imgHeight >= window.innerHeight) {
+						y = window.innerHeight - imgHeight;
+						dy = -Math.abs(dy);
+					}
+
+					img.style.left = `${x}px`;
+					img.style.top = `${y}px`;
+
+					requestAnimationFrame(animate);
 				}
-			`;
-			document.head.appendChild(style);
-		}""",
-			str(self.id)[-4:],
-		)
+				animate();
+
+				// Responsive: update bounds on resize
+				window.addEventListener('resize', () => {
+					x = Math.min(x, window.innerWidth - img.offsetWidth);
+					y = Math.min(y, window.innerHeight - img.offsetHeight);
+				});
+
+				// Add a little CSS for smoothness
+				const style = document.createElement('style');
+				style.textContent = `
+					#pretty-loading-animation {
+						/*backdrop-filter: blur(2px) brightness(0.9);*/
+					}
+					#pretty-loading-animation img {
+						user-select: none;
+						pointer-events: none;
+					}
+				`;
+				document.head.appendChild(style);
+			}""",
+				str(self.id)[-4:],
+			)
+
+			# BUGOWL: Bugowl logo circular animation
+			await page.evaluate(
+				"""(browser_session_label) => {
+				const animated_title = `Setting up #${browser_session_label}...`;
+				if (document.title === animated_title) {
+					return;      // already run on this tab, dont run again
+				}
+				document.title = animated_title;
+
+				// Create the main overlay
+				const loadingOverlay = document.createElement('div');
+				loadingOverlay.id = 'pretty-loading-animation';
+				loadingOverlay.style.position = 'fixed';
+				loadingOverlay.style.top = '0';
+				loadingOverlay.style.left = '0';
+				loadingOverlay.style.width = '100vw';
+				loadingOverlay.style.height = '100vh';
+				loadingOverlay.style.background = '#fff';
+				loadingOverlay.style.zIndex = '99999';
+				loadingOverlay.style.overflow = 'hidden';
+
+				// Create the image element
+				const img = document.createElement('img');
+				img.src = 'https://stg-bugowl.vercel.app/_next/image?url=%2Fbugowl-loader.gif&w=128&q=75';
+				img.alt = 'Browser-Use';
+				img.style.width = '200px';
+				img.style.height = 'auto';
+				img.style.position = 'absolute';
+				img.style.left = '0px';
+				img.style.top = '0px';
+				img.style.zIndex = '2';
+				img.style.opacity = '0.8';
+
+				loadingOverlay.appendChild(img);
+				document.body.appendChild(loadingOverlay);
+
+				// DVD screensaver bounce logic
+				let x = Math.random() * (window.innerWidth - 300);
+				let y = Math.random() * (window.innerHeight - 300);
+				let dx = 1.2 + Math.random() * 0.4; // px per frame
+				let dy = 1.2 + Math.random() * 0.4;
+				// Randomize direction
+				if (Math.random() > 0.5) dx = -dx;
+				if (Math.random() > 0.5) dy = -dy;
+
+				x = window.innerWidth / 2;
+				y = 100;
+				dy = 0;  // vertical velocity
+				const gravity = 0.2;
+				const damping = 0.8;
+
+				// Add this at the top with other variables
+				let angle = 0;
+				const radius = 100;
+				const centerX = window.innerWidth / 2;
+				const centerY = window.innerHeight / 2;
+
+				function animate() {
+					angle += 0.01;
+					x = centerX + Math.cos(angle) * radius - img.offsetWidth/2;
+					y = centerY + Math.sin(angle) * radius - img.offsetHeight/2;
+					
+					img.style.left = `${x}px`;
+					img.style.top = `${y}px`;
+					requestAnimationFrame(animate);
+				}
+
+				animate();
+
+				// Responsive: update bounds on resize
+				window.addEventListener('resize', () => {
+					x = Math.min(x, window.innerWidth - img.offsetWidth);
+					y = Math.min(y, window.innerHeight - img.offsetHeight);
+				});
+
+				// Add a little CSS for smoothness
+				const style = document.createElement('style');
+				style.innerHTML = `
+					#pretty-loading-animation {
+						/*backdrop-filter: blur(2px) brightness(0.9);*/
+					}
+					#pretty-loading-animation img {
+						user-select: none;
+						pointer-events: none;
+					}
+				`;
+				document.head.appendChild(style);
+			}""",
+				str(self.id)[-4:],
+			)
+		except Exception as e:
+			self.logger.debug(f'❌ Failed to show 📀 DVD loading animation: {type(e).__name__}: {e}')
+
+	@observe_debug(name='get_state_summary_with_fallback', ignore_output=True)
+	@require_healthy_browser(usable_page=True, reopen_page=True)
+	@time_execution_async('--get_state_summary_with_fallback')
+	async def get_state_summary_with_fallback(self, cache_clickable_elements_hashes: bool = True) -> BrowserStateSummary:
+		"""Get browser state with fallback to minimal state on errors
+
+		This method first tries to get a full state summary. If that fails,
+		it falls back to a minimal state summary to allow basic navigation.
+
+		Parameters:
+		-----------
+		cache_clickable_elements_hashes: bool
+			If True, cache the clickable elements hashes for the current state.
+
+		Returns:
+		--------
+		BrowserStateSummary: Either full state or minimal fallback state
+		"""
+		# Try 1: Full state summary (current implementation)
+		try:
+			return await self.get_state_summary(cache_clickable_elements_hashes)
+		except Exception as e:
+			self.logger.warning(f'Full state retrieval failed: {type(e).__name__}: {e}')
+			self.logger.warning('🔄 Falling back to minimal state summary')
+
+		# Try 2: Minimal state summary as fallback
+		return await self.get_minimal_state_summary()
+
+	async def _is_pdf_viewer(self, page: Page) -> bool:
+		"""
+		Check if the current page is displaying a PDF in Chrome's PDF viewer.
+		Returns True if PDF is detected, False otherwise.
+		"""
+		try:
+			is_pdf_viewer = await page.evaluate("""
+				() => {
+					// Check for Chrome's built-in PDF viewer (updated selector)
+					const pdfEmbed = document.querySelector('embed[type="application/x-google-chrome-pdf"]') ||
+									 document.querySelector('embed[type="application/pdf"]');
+					const isPdfViewer = !!pdfEmbed;
+					
+					// Also check if the URL ends with .pdf or has PDF content-type
+					const url = window.location.href;
+					const isPdfUrl = url.toLowerCase().includes('.pdf') || 
+									document.contentType === 'application/pdf';
+					
+					return isPdfViewer || isPdfUrl;
+				}
+			""")
+			return is_pdf_viewer
+		except Exception as e:
+			self.logger.debug(f'Error checking PDF viewer: {type(e).__name__}: {e}')
+			return False
+
+	async def _auto_download_pdf_if_needed(self, page: Page) -> str | None:
+		"""
+		Check if the current page is a PDF viewer and automatically download the PDF if so.
+		Returns the download path if a PDF was downloaded, None otherwise.
+		"""
+		if not self.browser_profile.downloads_path or not self._auto_download_pdfs:
+			return None
+
+		try:
+			# Check if we're in a PDF viewer
+			is_pdf_viewer = await self._is_pdf_viewer(page)
+			self.logger.debug(f'is_pdf_viewer: {is_pdf_viewer}')
+
+			if not is_pdf_viewer:
+				return None
+
+			# Get the PDF URL
+			pdf_url = page.url
+
+			# Check if we've already downloaded this PDF
+			pdf_filename = os.path.basename(pdf_url.split('?')[0])  # Remove query params
+			if not pdf_filename or not pdf_filename.endswith('.pdf'):
+				# Generate filename from URL
+				from urllib.parse import urlparse
+
+				parsed = urlparse(pdf_url)
+				pdf_filename = os.path.basename(parsed.path) or 'document.pdf'
+				if not pdf_filename.endswith('.pdf'):
+					pdf_filename += '.pdf'
+
+			# Check if already downloaded
+			expected_path = os.path.join(self.browser_profile.downloads_path, pdf_filename)
+			if any(os.path.basename(downloaded) == pdf_filename for downloaded in self._downloaded_files):
+				self.logger.debug(f'📄 PDF already downloaded: {pdf_filename}')
+				return None
+
+			self.logger.info(f'📄 Auto-downloading PDF from: {pdf_url}')
+
+			# Download the actual PDF file using JavaScript fetch
+			# Note: This should hit the browser cache since Chrome already downloaded the PDF to display it
+			try:
+				self.logger.debug(f'Downloading PDF from URL: {pdf_url}')
+
+				# Properly escape the URL to prevent JavaScript injection
+				escaped_pdf_url = json.dumps(pdf_url)
+
+				download_result = await page.evaluate(f"""
+					async () => {{
+						try {{
+							// Use fetch with cache: 'force-cache' to prioritize cached version
+							const response = await fetch({escaped_pdf_url}, {{
+								cache: 'force-cache'
+							}});
+							if (!response.ok) {{
+								throw new Error(`HTTP error! status: ${{response.status}}`);
+							}}
+							const blob = await response.blob();
+							const arrayBuffer = await blob.arrayBuffer();
+							const uint8Array = new Uint8Array(arrayBuffer);
+							
+							// Log whether this was served from cache
+							const fromCache = response.headers.has('age') || 
+											 !response.headers.has('date') ||
+											 performance.getEntriesByName({escaped_pdf_url}).some(entry => 
+												 entry.transferSize === 0 || entry.transferSize < entry.encodedBodySize
+											 );
+											 
+							return {{ 
+								data: Array.from(uint8Array),
+								fromCache: fromCache,
+								responseSize: uint8Array.length,
+								transferSize: response.headers.get('content-length') || 'unknown'
+							}};
+						}} catch (error) {{
+							throw new Error(`Fetch failed: ${{error.message}}`);
+						}}
+					}}
+				""")
+
+				if download_result and download_result.get('data') and len(download_result['data']) > 0:
+					# Ensure unique filename
+					unique_filename = await self._get_unique_filename(self.browser_profile.downloads_path, pdf_filename)
+					download_path = os.path.join(self.browser_profile.downloads_path, unique_filename)
+
+					# Save the PDF asynchronously
+					async with await anyio.open_file(download_path, 'wb') as f:
+						await f.write(bytes(download_result['data']))
+
+					# Track the downloaded file
+					self._downloaded_files.append(download_path)
+
+					# Log cache information
+					cache_status = 'from cache' if download_result.get('fromCache') else 'from network'
+					response_size = download_result.get('responseSize', 0)
+					self.logger.info(f'📄 Auto-downloaded PDF ({cache_status}, {response_size:,} bytes): {download_path}')
+
+					return download_path
+				else:
+					self.logger.warning(f'⚠️ No data received when downloading PDF from {pdf_url}')
+					return None
+
+			except Exception as e:
+				self.logger.warning(f'⚠️ Failed to auto-download PDF from {pdf_url}: {type(e).__name__}: {e}')
+				return None
+
+		except Exception as e:
+			self.logger.warning(f'⚠️ Error in PDF auto-download check: {type(e).__name__}: {e}')
+			return None

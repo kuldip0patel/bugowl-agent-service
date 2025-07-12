@@ -36,6 +36,7 @@ _exiting = False
 
 # Define generic type variables for return type and parameters
 R = TypeVar('R')
+T = TypeVar('T')
 P = ParamSpec('P')
 
 
@@ -413,6 +414,19 @@ def is_unsafe_pattern(pattern: str) -> bool:
 	return '*' in bare_domain
 
 
+def is_new_tab_page(url: str) -> bool:
+	"""
+	Check if a URL is a new tab page (about:blank or chrome://new-tab-page).
+
+	Args:
+		url: The URL to check
+
+	Returns:
+		bool: True if the URL is a new tab page, False otherwise
+	"""
+	return url in ('about:blank', 'chrome://new-tab-page/', 'chrome://new-tab-page')
+
+
 def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: bool = False) -> bool:
 	"""
 	Check if a URL matches a domain pattern. SECURITY CRITICAL.
@@ -426,7 +440,7 @@ def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: b
 	When no scheme is specified, https is used by default for security.
 	For example, 'example.com' will match 'https://example.com' but not 'http://example.com'.
 
-	Note: about:blank must be handled at the callsite, not inside this function.
+	Note: New tab pages (about:blank, chrome://new-tab-page) must be handled at the callsite, not inside this function.
 
 	Args:
 		url: The URL to check
@@ -437,8 +451,8 @@ def match_url_with_domain_pattern(url: str, domain_pattern: str, log_warnings: b
 		bool: True if the URL matches the pattern, False otherwise
 	"""
 	try:
-		# Note: about:blank should be handled at the callsite, not here
-		if url == 'about:blank':
+		# Note: new tab pages should be handled at the callsite, not here
+		if is_new_tab_page(url):
 			return False
 
 		parsed_url = urlparse(url)
@@ -588,38 +602,3 @@ def _log_pretty_url(s: str, max_len: int | None = 22) -> str:
 	if max_len is not None and len(s) > max_len:
 		return s[:max_len] + '…'
 	return s
-
-
-async def save_failure_screenshot(browser_session, task_id: str) -> str | None:
-	"""
-	Take a screenshot of the current browser state and save it to a file.
-
-	Args:
-		browser_session: The browser session to take the screenshot from
-		task_id: The task ID to include in the filename
-
-	Returns:
-		str: The path to the saved screenshot file, or None if saving failed
-	"""
-	import base64
-	from datetime import datetime
-
-	try:
-		screenshot_b64 = await browser_session.take_screenshot(full_page=True)
-		# Create screenshots directory if it doesn't exist
-		os.makedirs('screenshots', exist_ok=True)
-		# Generate filename with timestamp and task number
-		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-		filename = f'screenshots/failure_task_{task_id}_{timestamp}.png'
-		# Save the screenshot
-		import anyio
-
-		async with await anyio.open_file(filename, 'wb') as f:
-			# with open("network_logs/requests.json", "a") as f:
-			await f.write(base64.b64decode(screenshot_b64))
-
-		logger.info(f'Saved failure screenshot to {filename}')
-		return filename
-	except Exception as e:
-		logger.error(f'Failed to save screenshot: {str(e)}')
-		return None
