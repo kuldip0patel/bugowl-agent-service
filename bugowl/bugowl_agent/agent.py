@@ -13,6 +13,7 @@ from browser_use.browser import BrowserProfile
 from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
 
+from .tasks import update_status_main
 from .utils import get_llm_model, save_failure_screenshot, upload_video_S3
 
 # from .video_recording_streaming import VideoRecording
@@ -80,6 +81,7 @@ class AgentManager:
 			cloud_sync (str): Cloud sync configuration (default: None).
 			use_thinking (bool): Whether to enable thinking mode for the agent.
 		"""
+
 		self._setup_logger()
 		self.logger.info('Initializing AgentManager...')
 		self.job_instance = job_instance
@@ -159,6 +161,12 @@ class AgentManager:
 		if is_valid:
 			self.test_case_run = await sync_to_async(serializer.save)()
 			self.logger.info('Test case run data saved successfully.')
+			self.logger.info('Updating test case run status to RUNNING in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid),
+				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
+				test_case_status=self.test_case_run.status,
+			)
 			return True
 		else:
 			self.logger.error(f'Failed to save test case run data: {serializer.errors}', exc_info=True)
@@ -256,16 +264,16 @@ class AgentManager:
 		"""
 
 		if self.testtask_run:
-			update_fields = ['status']
+			update_fields = ['status', 'updated_at']
 			self.testtask_run.status = status
 			await sync_to_async(self.testtask_run.save)(update_fields=update_fields)
 
-	async def update_testcase_run(self, status, video_url, image_url=None):
+	async def update_testcase_run(self, status, video_url=None, image_url=None):
 		"""
 		Update the test case run status.
 		"""
 		if self.test_case_run:
-			update_fields = ['status']
+			update_fields = ['status', 'updated_at']
 			self.test_case_run.status = status
 			if video_url:
 				self.test_case_run.video = video_url
@@ -274,6 +282,12 @@ class AgentManager:
 				self.test_case_run.failure_screenshot = image_url
 				update_fields.append('failure_screenshot')
 			await sync_to_async(self.test_case_run.save)(update_fields=update_fields)
+			self.logger.info(f'Updating test case status to {status} in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid),
+				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
+				test_case_status=status,
+			)
 
 	async def update_job_instance(self, status):
 		"""
@@ -281,7 +295,11 @@ class AgentManager:
 		"""
 		if self.job_instance:
 			self.job_instance.status = status
-			await sync_to_async(self.job_instance.save)(update_fields=['status'])
+			await sync_to_async(self.job_instance.save)(update_fields=['status', 'updated_at'])
+			self.logger.info(f'Updating job status to {status} in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid), job_status=status
+			)
 
 	async def run_test_case(self):
 		"""
@@ -302,6 +320,7 @@ class AgentManager:
 				self.logger.info(f'testcase name: {test_case["name"]}')
 				test_tasks = test_case.pop('test_task')
 				result = await self.save_testcase_run(test_case)
+
 				if result:
 					if not self.browser_session:
 						await self.start_browser_session()

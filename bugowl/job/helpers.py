@@ -1,5 +1,8 @@
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 
+import jwt
 from api.utils import Browser
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
@@ -348,3 +351,32 @@ def get_test_case_details(job_uuid, test_case_uuid):
 		response_data['test_tasks'].append(test_task_data)
 
 	return response_data
+
+
+def generate_agent_JWT_token(source='agent'):
+	"""
+	Generate a short-lived JWT token for a user.
+
+	Args:
+	    source : agent
+
+	Returns:
+	    str: Signed JWT token.
+	"""
+	secret_key = os.getenv('AGENT_SERVER_SECRET_KEY')  # Fetch the secret key from settings.CONFIG
+	if not secret_key:
+		raise ValueError('AGENT_SERVER_SECRET_KEY is not set in the environment variables.')
+
+	issuer = 'agent-BugOwl'  # Set the issuer (you can customize this)
+	expiration_time = datetime.now(timezone.utc) + timedelta(minutes=10)  # Token valid for 10 minutes
+	issued_at = datetime.now(timezone.utc)
+
+	payload = {
+		'source': source,  # Include the source in the payload
+		'exp': expiration_time,
+		'iat': issued_at,
+		'iss': issuer,
+	}
+
+	token = jwt.encode(payload, secret_key, algorithm='HS256')
+	return token, payload
