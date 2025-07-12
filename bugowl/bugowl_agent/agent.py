@@ -105,6 +105,7 @@ class AgentManager:
 		self.testtask_run = None
 		self.test_case_list = None
 		self.testtask_list = None
+		self.page = None
 		self.logger.info('AgentManager initialized successfully.')
 
 	def get_chrome_args(self):
@@ -151,7 +152,6 @@ class AgentManager:
 			args=self.get_chrome_args(),
 		)
 		self.browser_session = BrowserSession(browser_profile=browser_profile)
-		# self.video_recording = VideoRecording(self)
 		self.logger.info('Browser session configured.')
 
 	async def save_testcase_run(self, test_case_run_data):
@@ -250,7 +250,9 @@ class AgentManager:
 		Stop the browser session.
 		"""
 		if self.browser_session:
+			self.page = await self.browser_session.get_current_page()
 			await self.browser_session.kill()
+			self.browser_session = None
 			self.logger.info('Browser session stopped.')
 
 	async def update_testtask_run(self, status):
@@ -275,6 +277,16 @@ class AgentManager:
 				self.test_case_run.video = video_url
 			await sync_to_async(self.test_case_run.save)(update_fields=['status', 'video'])
 
+	async def update_job_instance(self, status):
+		"""
+		Update the job instance status.
+		"""
+		if self.job_instance:
+			self.job_instance.status = (
+				status if self.job_instance.status == JobStatusEnum.RUNNING.value else self.job_instance.status
+			)
+			await sync_to_async(self.job_instance.save)(update_fields=['status'])
+
 	async def run_test_case(self):
 		"""
 		Run a test case.
@@ -286,9 +298,6 @@ class AgentManager:
 		self.logger.info('Running test cases...')
 
 		try:
-			# if not self.browser_session:
-			# 	await self.start_browser_session()
-			# self.logger.info('Browser session is ready. Starting test case execution...')
 			run_results = {}
 			for test_case in self.test_case_list:
 				self.logger.info(f'testcase name: {test_case["name"]}')
@@ -305,7 +314,6 @@ class AgentManager:
 						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
 					run_results[self.test_case_run.name] = []  # type: ignore
-					# await self.video_recording.start()
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
 						test_task['test_case_run'] = self.test_case_run.id if self.test_case_run else None
@@ -336,14 +344,12 @@ class AgentManager:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
 							return
 
-							# After all test tasks for this test case are executed, check their results
+					# After all test tasks for this test case are executed, check their results
 					await self.stop_browser_session()
 					video_url = await self.upload_video_S3()
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
-					# video_url = await self.video_recording.stop()
-					# self.logger.info(f'Video URL: {video_url}')
 					await self.update_testcase_run(status=final_status, video_url=video_url)
 
 				else:
@@ -397,6 +403,14 @@ class AgentManager:
 			self.process_job_payload()
 			run_results = asyncio.run(self.run_test_case())
 			self.logger.info('Job completed.')
+			self.logger.info(f'Run results: {run_results}')
+
+			all_testcases_passed = all(
+				all(task_result['result'] == '✅ SUCCESSFUL' for task_result in tasks)
+				for tasks in run_results.values()  # type: ignore
+			)
+			final_job_status = JobStatusEnum.PASS_.value if all_testcases_passed else JobStatusEnum.FAILED.value
+			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except Exception as e:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
@@ -408,14 +422,10 @@ class AgentManager:
 		This should be called after the browser session is stopped.
 		"""
 		try:
-			if not self.browser_session:
-				self.logger.error('No browser session to upload video from.')
-				return None
-			page = await self.browser_session.get_current_page()
-			if not page:
+			if not self.page:
 				self.logger.error('No page to upload video from.')
 				return None
-			video_path = await page.video.path()  # type: ignore
+			video_path = await self.page.video.path()  # type: ignore
 			if not video_path or not os.path.exists(video_path):
 				self.logger.error(f'No video file found at {video_path}')
 				return None
@@ -457,6 +467,12 @@ class AgentManager:
 			except Exception as e:
 				self.logger.error(f'Failed to upload video to S3: {e}')
 				return None
+			# Delete the local video file after successful upload
+			try:
+				os.remove(new_video_path)
+				self.logger.info(f'Deleted local video file: {new_video_path}')
+			except Exception as e:
+				self.logger.warning(f'Failed to delete local video file {new_video_path}: {e}')
 			if s3_custom_domain:
 				url = f'https://{s3_custom_domain}/{s3_key}'
 			else:
