@@ -9,6 +9,7 @@ import boto3
 import coloredlogs
 from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
 
@@ -462,15 +463,17 @@ class AgentManager:
 			if s3_object_parameters:
 				extra_args.update(s3_object_parameters)
 			try:
-				s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
+				if 'LOCAL' != settings.ENV.upper():
+					s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
 				self.logger.info(f'Upload to S3 successful: {s3_key}')
 			except Exception as e:
 				self.logger.error(f'Failed to upload video to S3: {e}')
 				return None
 			# Delete the local video file after successful upload
 			try:
-				os.remove(new_video_path)
-				self.logger.info(f'Deleted local video file: {new_video_path}')
+				if 'LOCAL' != settings.ENV.upper():
+					os.remove(new_video_path)
+					self.logger.info(f'Deleted local video file: {new_video_path}')
 			except Exception as e:
 				self.logger.warning(f'Failed to delete local video file {new_video_path}: {e}')
 			if s3_custom_domain:
