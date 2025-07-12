@@ -16,6 +16,7 @@ class TestCaseRunAdmin(admin.ModelAdmin):
 		'base_url',
 		'status',
 		'video',
+		'failure_screenshot',
 		'llm',
 		'browser',
 		'browser_session',

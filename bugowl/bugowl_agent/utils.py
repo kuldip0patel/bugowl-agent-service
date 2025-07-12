@@ -205,7 +205,7 @@ async def upload_video_S3(job_instance, test_case_run, video_path, logger):
 		return None
 
 
-async def save_failure_screenshot(browser_session, logger, job_uuid, test_case_uuid, task_id: str) -> str | None:
+async def save_failure_screenshot(browser_session, logger, job_uuid, task_id: str) -> str | None:
 	"""
 	Take a screenshot of the current browser state and save it to a file.
 
@@ -219,8 +219,8 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, test_case_u
 
 	try:
 		screenshot_b64 = await browser_session.take_screenshot(full_page=True)
-		# Build the directory path: failure_screenshots/job_uuid/test_case_uuid
-		dir_path = os.path.join('failure_screenshots', str(job_uuid), str(test_case_uuid))
+		# Build the directory path: failure_screenshots/job_uuid
+		dir_path = os.path.join('failure_screenshots', str(job_uuid))
 		os.makedirs(dir_path, exist_ok=True)
 		filename = os.path.join(dir_path, f'{task_id}.png')
 
@@ -239,7 +239,7 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, test_case_u
 			region_name=region_name,
 		)
 		s3 = session.client('s3')
-		s3_key = f'failure_screenshots/{job_uuid}/{test_case_uuid}/{task_id}.png'
+		s3_key = f'failure_screenshots/{job_uuid}/{task_id}.png'
 		extra_args = {}
 		if s3_object_parameters:
 			extra_args.update(s3_object_parameters)

@@ -250,19 +250,17 @@ class AgentManager:
 			self.browser_session = None
 			self.logger.info('Browser session stopped.')
 
-	async def update_testtask_run(self, status, image_url=None):
+	async def update_testtask_run(self, status):
 		"""
 		Update the test task run status.
 		"""
-		update_fields = ['status']
+
 		if self.testtask_run:
+			update_fields = ['status']
 			self.testtask_run.status = status
-			if image_url:
-				self.testtask_run.failure_screenshot = image_url
-				update_fields.append('failure_screenshot')
 			await sync_to_async(self.testtask_run.save)(update_fields=update_fields)
 
-	async def update_testcase_run(self, status, video_url):
+	async def update_testcase_run(self, status, video_url, image_url=None):
 		"""
 		Update the test case run status.
 		"""
@@ -272,6 +270,9 @@ class AgentManager:
 			if video_url:
 				self.test_case_run.video = video_url
 				update_fields.append('video')
+			if image_url:
+				self.test_case_run.failure_screenshot = image_url
+				update_fields.append('failure_screenshot')
 			await sync_to_async(self.test_case_run.save)(update_fields=update_fields)
 
 	async def update_job_instance(self, status):
@@ -312,6 +313,7 @@ class AgentManager:
 						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
 					run_results[self.test_case_run.name] = []  # type: ignore
+					image_url = None
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
 						test_task['test_case_run'] = self.test_case_run.id if self.test_case_run else None
@@ -328,22 +330,22 @@ class AgentManager:
 							)
 
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
+							self.logger.info(f'Task #{count} Result: {output}')
+							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
+
 							if not history.is_successful():
 								# Handle failure (e.g., take a screenshot)
-
 								image_url = await save_failure_screenshot(
 									self.browser_session,
 									self.logger,
 									str(self.job_instance.job_uuid),
 									str(self.test_case_run.test_case_uuid),  # type: ignore
-									str(self.testtask_run.test_task_uuid),  # type: ignore
 								)
-								await self.update_testtask_run(status=JobStatusEnum.FAILED.value, image_url=image_url)
+								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
+								break
 							else:
-								await self.update_testtask_run(status=JobStatusEnum.PASS_.value, image_url=None)
-
-							self.logger.info(f'Task #{count} Result: {output}')
-							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
+								image_url = None
+								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
 
 						else:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
@@ -361,7 +363,7 @@ class AgentManager:
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
-					await self.update_testcase_run(status=final_status, video_url=video_url)
+					await self.update_testcase_run(status=final_status, video_url=video_url, image_url=image_url)
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
