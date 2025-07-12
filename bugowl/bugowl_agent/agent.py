@@ -1,15 +1,10 @@
 import asyncio
-import json
 import logging
-import os
 import uuid
-from datetime import datetime
 
-import boto3
 import coloredlogs
 from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
 
@@ -17,9 +12,8 @@ from browser_use import Agent
 from browser_use.browser import BrowserProfile
 from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
-from browser_use.utils import save_failure_screenshot
 
-from .utils import get_llm_model
+from .utils import get_llm_model, save_failure_screenshot, upload_video_S3
 
 # from .video_recording_streaming import VideoRecording
 
@@ -256,13 +250,17 @@ class AgentManager:
 			self.browser_session = None
 			self.logger.info('Browser session stopped.')
 
-	async def update_testtask_run(self, status):
+	async def update_testtask_run(self, status, image_url=None):
 		"""
 		Update the test task run status.
 		"""
+		update_fields = ['status']
 		if self.testtask_run:
 			self.testtask_run.status = status
-			await sync_to_async(self.testtask_run.save)(update_fields=['status'])
+			if image_url:
+				self.testtask_run.failure_screenshot = image_url
+				update_fields.append('failure_screenshot')
+			await sync_to_async(self.testtask_run.save)(update_fields=update_fields)
 
 	async def update_testcase_run(self, status, video_url):
 		"""
@@ -332,10 +330,17 @@ class AgentManager:
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							if not history.is_successful():
 								# Handle failure (e.g., take a screenshot)
-								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
-								await save_failure_screenshot(self.browser_session, str(self.test_case_run.test_case_uuid))  # type: ignore
+
+								image_url = await save_failure_screenshot(
+									self.browser_session,
+									self.logger,
+									str(self.job_instance.job_uuid),
+									str(self.test_case_run.test_case_uuid),  # type: ignore
+									str(self.testtask_run.test_task_uuid),  # type: ignore
+								)
+								await self.update_testtask_run(status=JobStatusEnum.FAILED.value, image_url=image_url)
 							else:
-								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
+								await self.update_testtask_run(status=JobStatusEnum.PASS_.value, image_url=None)
 
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
@@ -346,7 +351,12 @@ class AgentManager:
 
 					# After all test tasks for this test case are executed, check their results
 					await self.stop_browser_session()
-					video_url = await self.upload_video_S3()
+					video_url = await upload_video_S3(
+						self.job_instance,
+						self.test_case_run,
+						self.page.video.path() if self.page else None,  # type: ignore
+						self.logger,
+					)
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
@@ -415,85 +425,3 @@ class AgentManager:
 		except Exception as e:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
 			raise
-
-	async def upload_video_S3(self):
-		"""
-		Upload the Playwright video recording for the current test case to S3.
-		This should be called after the browser session is stopped.
-		"""
-		try:
-			if not self.page:
-				self.logger.error('No page to upload video from.')
-				return None
-			video_path = await self.page.video.path()  # type: ignore
-			if not video_path or not os.path.exists(video_path):
-				self.logger.error(f'No video file found at {video_path}')
-				return None
-
-			# Generate new filename
-			new_filename = self.get_video_filename()
-			new_video_dir = os.path.join('videos', 'browser_recordings')
-			os.makedirs(new_video_dir, exist_ok=True)
-			new_video_path = os.path.join(new_video_dir, new_filename)
-
-			# Rename/move the video file
-			os.rename(video_path, new_video_path)
-			self.logger.info(f'Renamed video from {video_path} to {new_video_path}')
-
-			# Upload to S3
-			# Use the same logic as in VideoRecording.upload_to_s3
-
-			s3_bucket = os.getenv('AWS_STORAGE_BUCKET_NAME')
-			aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-			aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-			region_name = os.getenv('AWS_S3_REGION_NAME')
-			s3_custom_domain = os.getenv('AWS_S3_CUSTOM_DOMAIN')
-			obj_params = os.getenv('AWS_S3_OBJECT_PARAMETERS')
-			s3_object_parameters = json.loads(obj_params) if obj_params else None
-
-			session = boto3.session.Session(  # type: ignore
-				aws_access_key_id=aws_access_key_id,
-				aws_secret_access_key=aws_secret_access_key,
-				region_name=region_name,
-			)
-			s3 = session.client('s3')
-			s3_key = f'videos/browser_recordings/{new_filename}'
-			extra_args = {}
-			if s3_object_parameters:
-				extra_args.update(s3_object_parameters)
-			try:
-				if 'LOCAL' != settings.ENV.upper():
-					s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
-					self.logger.info(f'Upload to S3 successful: {s3_key}')
-				else:
-					self.logger.info(f'Skipping S3 upload in LOCAL environment: {s3_key}')
-			except Exception as e:
-				self.logger.error(f'Failed to upload video to S3: {e}')
-				return None
-			# Delete the local video file after successful upload
-			try:
-				if 'LOCAL' != settings.ENV.upper():
-					os.remove(new_video_path)
-					self.logger.info(f'Deleted local video file: {new_video_path}')
-				else:
-					self.logger.info(f'Skipping local file deletion in LOCAL environment: {new_video_path}')
-			except Exception as e:
-				self.logger.warning(f'Failed to delete local video file {new_video_path}: {e}')
-			if s3_custom_domain:
-				url = f'https://{s3_custom_domain}/{s3_key}'
-			else:
-				url = f'https://{s3_bucket}.s3.amazonaws.com/{s3_key}'
-			self.logger.info(f'S3 video URL: {url}')
-			return url
-		except Exception as e:
-			self.logger.error(f'Error in upload_video_S3: {e}', exc_info=True)
-			return None
-
-	def get_video_filename(self, ext='mp4'):
-		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-		uid = str(uuid.uuid4())
-		job_uuid = self.job_instance.job_uuid
-		testcase_uuid = self.test_case_run.test_case_uuid  # type: ignore
-		filename = f'{job_uuid}-{testcase_uuid}-{uid}_{timestamp}.{ext}'
-		self.logger.debug(f'Generated video filename: {filename}')
-		return filename
