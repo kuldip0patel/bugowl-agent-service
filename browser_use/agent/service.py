@@ -1176,7 +1176,6 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			self._force_exit_telemetry_logged = False  # ADDED: Flag for custom telemetry on force exit
 
 			# Set up the  signal handler with callbacks specific to this agent
-			from browser_use.utils import SignalHandler
 
 			# Define the custom exit callback function for second CTRL+C
 			def on_force_exit_log_telemetry():
@@ -1186,14 +1185,14 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 					self.telemetry.flush()
 				self._force_exit_telemetry_logged = True  # Set the flag
 
-			signal_handler = SignalHandler(
-				loop=loop,
-				pause_callback=self.pause,
-				resume_callback=self.resume,
-				custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
-				exit_on_second_int=True,
-			)
-			signal_handler.register()
+			# signal_handler = SignalHandler(
+			# 	loop=loop,
+			# 	pause_callback=self.pause,
+			# 	resume_callback=self.resume,
+			# 	custom_exit_callback=on_force_exit_log_telemetry,  # Pass the new telemetrycallback
+			# 	exit_on_second_int=True,
+			# )
+			# signal_handler.register() #BUGOWL: Disabling, not needed
 
 		try:
 			self._log_agent_run()
@@ -1227,7 +1226,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				if self.state.paused:
 					self.logger.debug(f'⏸️ Step {step}: Agent paused, waiting to resume...')
 					await self.wait_until_resumed()
-					signal_handler.reset()
+					# signal_handler.reset() #BUGOWL: Disabling, not needed
 
 				# Check if we should stop due to too many failures
 				if self.state.consecutive_failures >= self.settings.max_failures:
@@ -1337,7 +1336,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			await self.token_cost_service.log_usage_summary()
 
 			# Unregister signal handlers before cleanup
-			signal_handler.unregister()
+			# signal_handler.unregister() #BUGOWL: Disabling, not needed
 
 			if not self._force_exit_telemetry_logged:  # MODIFIED: Check the flag
 				try:
@@ -1382,7 +1381,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			# Use longer timeout to avoid deadlocks in tests with multiple agents
 			await self.eventbus.stop(timeout=10.0)
 
-			await self.close()
+			# await self.close()  #BUGOWL: Not closing browser session at every task/step run but at the end of the test case.
 
 	@observe_debug()
 	@time_execution_async('--multi_act')
