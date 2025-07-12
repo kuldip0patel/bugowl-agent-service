@@ -261,9 +261,7 @@ class AgentManager:
 		Update the test task run status.
 		"""
 		if self.testtask_run:
-			self.testtask_run.status = (
-				status if self.testtask_run.status == JobStatusEnum.RUNNING.value else self.testtask_run.status
-			)
+			self.testtask_run.status = status
 			await sync_to_async(self.testtask_run.save)(update_fields=['status'])
 
 	async def update_testcase_run(self, status, video_url):
@@ -271,21 +269,19 @@ class AgentManager:
 		Update the test case run status.
 		"""
 		if self.test_case_run:
-			self.test_case_run.status = (
-				status if self.test_case_run.status == JobStatusEnum.RUNNING.value else self.test_case_run.status
-			)
+			update_fields = ['status']
+			self.test_case_run.status = status
 			if video_url:
 				self.test_case_run.video = video_url
-			await sync_to_async(self.test_case_run.save)(update_fields=['status', 'video'])
+				update_fields.append('video')
+			await sync_to_async(self.test_case_run.save)(update_fields=update_fields)
 
 	async def update_job_instance(self, status):
 		"""
 		Update the job instance status.
 		"""
 		if self.job_instance:
-			self.job_instance.status = (
-				status if self.job_instance.status == JobStatusEnum.RUNNING.value else self.job_instance.status
-			)
+			self.job_instance.status = status
 			await sync_to_async(self.job_instance.save)(update_fields=['status'])
 
 	async def run_test_case(self):
@@ -297,6 +293,9 @@ class AgentManager:
 			return
 
 		self.logger.info('Running test cases...')
+
+		self.logger.info('updating job status to RUNNING')
+		await self.update_job_instance(status=JobStatusEnum.RUNNING.value)
 
 		try:
 			run_results = {}
@@ -465,7 +464,9 @@ class AgentManager:
 			try:
 				if 'LOCAL' != settings.ENV.upper():
 					s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
-				self.logger.info(f'Upload to S3 successful: {s3_key}')
+					self.logger.info(f'Upload to S3 successful: {s3_key}')
+				else:
+					self.logger.info(f'Skipping S3 upload in LOCAL environment: {s3_key}')
 			except Exception as e:
 				self.logger.error(f'Failed to upload video to S3: {e}')
 				return None
@@ -474,6 +475,8 @@ class AgentManager:
 				if 'LOCAL' != settings.ENV.upper():
 					os.remove(new_video_path)
 					self.logger.info(f'Deleted local video file: {new_video_path}')
+				else:
+					self.logger.info(f'Skipping local file deletion in LOCAL environment: {new_video_path}')
 			except Exception as e:
 				self.logger.warning(f'Failed to delete local video file {new_video_path}: {e}')
 			if s3_custom_domain:
