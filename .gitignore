@@ -23,6 +23,7 @@ dist/
 # Data files
 *.gif
 #*.txt
+*.txt
 *.pdf
 *.csv
 *.json
@@ -38,6 +39,7 @@ browser_cookies.json
 cookies.json
 gcp-login.json
 saved_trajectories/
+old_tests/
 AgentHistory.json
 AgentHistoryList.json
 private_example.py
@@ -55,3 +57,8 @@ logs/
 
 staticfiles
 db.sqlite3
+# Google API credentials
+credentials.json
+token.json
+
+!docs/docs.json

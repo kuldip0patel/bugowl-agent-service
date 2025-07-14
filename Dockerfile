@@ -180,6 +180,10 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$T
      && ( \
         uv pip install "$(grep -oP 'p....right>=([0-9.])+' pyproject.toml | head -n 1)" \
         && uv pip install "$(grep -oP 'p....right>=([0-9.])+' pyproject.toml | tail -n 1)" \
+        PLAYWRIGHT_VERSION=$(grep -E "playwright>=" pyproject.toml | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1) \
+        && PATCHRIGHT_VERSION=$(grep -E "patchright>=" pyproject.toml | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1) \
+        && echo "Installing playwright==$PLAYWRIGHT_VERSION patchright==$PATCHRIGHT_VERSION" \
+        && uv pip install playwright==$PLAYWRIGHT_VERSION patchright==$PATCHRIGHT_VERSION \
         && which playwright \
         && playwright --version \
         && echo -e '\n\n' \
@@ -205,6 +209,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         && ls -la "$PLAYWRIGHT_BROWSERS_PATH" || echo "Browser path not found" \
         && echo "Browser permissions:" \
         && ls -la "$PLAYWRIGHT_BROWSERS_PATH"/*/ | head -5 || echo "Cannot list browser subdirectories" \
+    && ( \
+        which chromium-browser && /usr/bin/chromium-browser --version \
         && echo -e '\n\n' \
     ) | tee -a /VERSION.txt
 
@@ -271,14 +277,19 @@ RUN ["apt-get", "install", "-y", "vim"]
 # Switch back to root for entrypoint script execution
 USER root
 
-VOLUME "$DATA_DIR"
-EXPOSE 8010
-EXPOSE 8020
-EXPOSE 9242
-EXPOSE 9222
-
 # Set working directory
 WORKDIR /app
 
 # Default command (can be overridden by docker-compose)
 CMD ["/bin/bash"]
+USER "$BROWSERUSE_USER"
+VOLUME "$DATA_DIR"
+EXPOSE 9242
+EXPOSE 9222
+EXPOSE 8010
+EXPOSE 8020
+
+# HEALTHCHECK --interval=30s --timeout=20s --retries=15 \
+#     CMD curl --silent 'http://localhost:8000/health/' | grep -q 'OK'
+
+ENTRYPOINT ["browser-use"]
