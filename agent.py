@@ -114,6 +114,10 @@ async def run_tasks(tasks: list[str]):
 	my_browser_session = BrowserSession(browser_profile=browser_profile)
 
 	await my_browser_session.start()
+
+	# Create a new tab with animation
+	await my_browser_session.navigate('about:blank', new_tab=True)
+
 	print('BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....')
 
 	# Load sensitive data from environment variables
