@@ -87,10 +87,11 @@ async def run_tasks(tasks: list[str]):
 	    tasks: List of tasks to execute
 	"""
 	llm_openai = ChatOpenAI(model='gpt-4o')
+	# llm_openai = ChatOpenAI(model='gpt-4.1')
 	# llm_openai = ChatOpenAI(model="gpt-4.1-nano") #This model does not return "done" action and goes on about it.
 	llm_google = ChatGoogle(model='gemini-2.5-flash')
 	llm = llm_openai
-	llm = llm_google
+	# llm = llm_google
 
 	# Detect the screen size
 	screen_size = get_display_size() or {'width': 1920, 'height': 1080}  # fallback if detection fails
@@ -113,6 +114,10 @@ async def run_tasks(tasks: list[str]):
 	my_browser_session = BrowserSession(browser_profile=browser_profile)
 
 	await my_browser_session.start()
+
+	# Create a new tab with animation
+	await my_browser_session.navigate('about:blank', new_tab=True)
+
 	print('BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....')
 
 	# Load sensitive data from environment variables
@@ -150,6 +155,7 @@ async def run_tasks(tasks: list[str]):
 				sensitive_data=sensitive_data,
 				cloud_sync=None,
 				use_thinking=False,
+				file_system=None,
 			)
 		else:
 			agent.add_new_task(task)
@@ -169,6 +175,7 @@ async def run_tasks(tasks: list[str]):
 		print(f'\033[94m{res}\033[0m')
 	await my_browser_session.close()
 	if agent:
+		agent.browser_profile.keep_alive = False
 		await agent.close()
 
 

@@ -5,13 +5,14 @@ from typing import Any, TypeVar, overload
 
 import httpx
 from anthropic import (
+	NOT_GIVEN,
 	APIConnectionError,
 	APIStatusError,
 	AsyncAnthropic,
 	NotGiven,
 	RateLimitError,
 )
-from anthropic.types import Message, ToolParam
+from anthropic.types import CacheControlEphemeralParam, Message, ToolParam
 from anthropic.types.model_param import ModelParam
 from anthropic.types.text_block import TextBlock
 from anthropic.types.tool_choice_tool_param import ToolChoiceToolParam
@@ -22,6 +23,7 @@ from browser_use.llm.anthropic.serializer import AnthropicMessageSerializer
 from browser_use.llm.base import BaseChatModel
 from browser_use.llm.exceptions import ModelProviderError, ModelRateLimitError
 from browser_use.llm.messages import BaseMessage
+from browser_use.llm.schema import SchemaOptimizer
 from browser_use.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 
 T = TypeVar('T', bound=BaseModel)
@@ -43,7 +45,7 @@ class ChatAnthropic(BaseChatModel):
 	auth_token: str | None = None
 	base_url: str | httpx.URL | None = None
 	timeout: float | Timeout | None | NotGiven = NotGiven()
-	max_retries: int = 2
+	max_retries: int = 10
 	default_headers: Mapping[str, str] | None = None
 	default_query: Mapping[str, object] | None = None
 
@@ -102,9 +104,15 @@ class ChatAnthropic(BaseChatModel):
 
 	def _get_usage(self, response: Message) -> ChatInvokeUsage | None:
 		usage = ChatInvokeUsage(
-			prompt_tokens=response.usage.input_tokens,
+			prompt_tokens=response.usage.input_tokens
+			+ (
+				response.usage.cache_read_input_tokens or 0
+			),  # Total tokens in Anthropic are a bit fucked, you have to add cached tokens to the prompt tokens
 			completion_tokens=response.usage.output_tokens,
 			total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+			prompt_cached_tokens=response.usage.cache_read_input_tokens,
+			prompt_cache_creation_tokens=response.usage.cache_creation_input_tokens,
+			prompt_image_tokens=None,
 		)
 		return usage
 
@@ -123,7 +131,10 @@ class ChatAnthropic(BaseChatModel):
 			if output_format is None:
 				# Normal completion without structured output
 				response = await self.get_client().messages.create(
-					model=self.model, messages=anthropic_messages, **self._get_client_params_for_invoke()
+					model=self.model,
+					messages=anthropic_messages,
+					system=system_prompt or NOT_GIVEN,
+					**self._get_client_params_for_invoke(),
 				)
 
 				usage = self._get_usage(response)
@@ -145,14 +156,17 @@ class ChatAnthropic(BaseChatModel):
 				# Use tool calling for structured output
 				# Create a tool that represents the output format
 				tool_name = output_format.__name__
-				schema = output_format.model_json_schema()
+				schema = SchemaOptimizer.create_optimized_json_schema(output_format)
 
 				# Remove title from schema if present (Anthropic doesn't like it in parameters)
 				if 'title' in schema:
 					del schema['title']
 
 				tool = ToolParam(
-					name=tool_name, description=f'Extract information in the format of {tool_name}', input_schema=schema
+					name=tool_name,
+					description=f'Extract information in the format of {tool_name}',
+					input_schema=schema,
+					cache_control=CacheControlEphemeralParam(type='ephemeral'),
 				)
 
 				# Force the model to use this tool
@@ -162,6 +176,7 @@ class ChatAnthropic(BaseChatModel):
 					model=self.model,
 					messages=anthropic_messages,
 					tools=[tool],
+					system=system_prompt or NOT_GIVEN,
 					tool_choice=tool_choice,
 					**self._get_client_params_for_invoke(),
 				)
