@@ -248,6 +248,13 @@ class AgentManager:
 		await self.browser_session.start()  # type: ignore
 		self.logger.info('Browser session started.')
 
+		if self.browser_session:
+			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
+				self.browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
+				await self.browser_session._show_dvd_screensaver_loading_animation(self.browser_session.browser_context.pages[0])
+			else:
+				self.browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
+
 	async def stop_browser_session(self):
 		"""
 		Stop the browser session.

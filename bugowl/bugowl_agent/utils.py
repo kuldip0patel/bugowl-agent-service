@@ -221,6 +221,10 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, task_id: st
 	try:
 		screenshot_b64 = await browser_session.take_screenshot(full_page=True)
 		# Build the directory path: failure_screenshots/job_uuid
+		if not job_uuid:
+			job_uuid = str(uuid.uuid4())
+		if not task_id:
+			task_id = str(uuid.uuid4())
 		dir_path = os.path.join('failure_screenshots', str(job_uuid))
 		os.makedirs(dir_path, exist_ok=True)
 		filename = os.path.join(dir_path, f'{task_id}.png')
