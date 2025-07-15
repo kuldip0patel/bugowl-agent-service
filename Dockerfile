@@ -180,7 +180,7 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$T
      && ( \
         uv pip install "$(grep -oP 'p....right>=([0-9.])+' pyproject.toml | head -n 1)" \
         && uv pip install "$(grep -oP 'p....right>=([0-9.])+' pyproject.toml | tail -n 1)" \
-        PLAYWRIGHT_VERSION=$(grep -E "playwright>=" pyproject.toml | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1) \
+        && PLAYWRIGHT_VERSION=$(grep -E "playwright>=" pyproject.toml | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1) \
         && PATCHRIGHT_VERSION=$(grep -E "patchright>=" pyproject.toml | grep -o "[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1) \
         && echo "Installing playwright==$PLAYWRIGHT_VERSION patchright==$PATCHRIGHT_VERSION" \
         && uv pip install playwright==$PLAYWRIGHT_VERSION patchright==$PATCHRIGHT_VERSION \
@@ -209,8 +209,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         && ls -la "$PLAYWRIGHT_BROWSERS_PATH" || echo "Browser path not found" \
         && echo "Browser permissions:" \
         && ls -la "$PLAYWRIGHT_BROWSERS_PATH"/*/ | head -5 || echo "Cannot list browser subdirectories" \
-    && ( \
-        which chromium-browser && /usr/bin/chromium-browser --version \
+        && which chromium-browser && /usr/bin/chromium-browser --version \
         && echo -e '\n\n' \
     ) | tee -a /VERSION.txt
 

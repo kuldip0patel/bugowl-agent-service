@@ -1,0 +1,5 @@
+open amazon.in
+search tea pot
+find the boiling pan with handle
+add the first item in the cart
+close the browser
