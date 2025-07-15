@@ -170,7 +170,7 @@ WSGI_APPLICATION = 'api.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-if 'LOCAL' in ENVIRONMENT.upper() or 'STG' in ENVIRONMENT.upper():
+if 'LOCAL' in ENVIRONMENT.upper():
 	DATABASES = {
 		'default': {
 			'ENGINE': 'django.db.backends.sqlite3',
@@ -186,7 +186,7 @@ else:
 			'PASSWORD': os.getenv('BUGOWL_AGENT_DATABASE_PASSWORD'),
 			'HOST': os.getenv('BUGOWL_AGENT_DATABASE_HOST'),
 			'PORT': os.getenv('BUGOWL_AGENT_DATABASE_PORT'),
-			'CONN_MAX_AGE': 600,  # Keep connections open for 10 minutes
+			'CONN_MAX_AGE': 300,  # Keep connections open for 10 minutes
 		}
 	}
 

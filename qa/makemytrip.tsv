@@ -1,0 +1,11 @@
+	1.	Open the homepage of MakeMyTrip.
+	2.	Click on the “From” city input field.
+	3.	Type “New Delhi” and select from the dropdown.
+	4.	Click on the “To” city input field.
+	5.	Type “Mumbai” and select from the dropdown.
+	6.	Click on the departure date field.
+	7.	Select a date 7 days from today on the calendar.
+	8.	Click on the “Search” button.
+	9.	Wait for the flight results page to load.
+	10.	Click on the first listed flight option.
+	11.	Verify that the booking summary displays “New Delhi to Mumbai”.

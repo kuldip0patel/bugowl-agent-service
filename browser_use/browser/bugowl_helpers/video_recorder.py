@@ -34,6 +34,9 @@ class VideoRecorder:
 
 	def start_recording(self, action_index: int):
 		"""Start recording a new video segment"""
+		if cv2 is None:
+			raise ImportError('OpenCV (cv2) is required for video recording')
+
 		if self.current_video is not None:
 			self.stop_recording()
 
@@ -41,8 +44,8 @@ class VideoRecorder:
 		filename = f'action_{action_index}_{timestamp}.mp4'
 		self.current_filename = os.path.join(self.save_dir, filename)
 
-		fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-		self.current_video = cv2.VideoWriter(self.current_filename, fourcc, self.fps, (self.width, self.height))
+		fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # type: ignore[attr-defined]
+		self.current_video = cv2.VideoWriter(self.current_filename, fourcc, self.fps, (self.width, self.height))  # type: ignore[attr-defined]
 		logger.info(f'Started recording to {self.current_filename}')
 
 	def add_frame(self, frame: np.ndarray):
@@ -69,12 +72,15 @@ class LiveStreamer:
 
 	def start_streaming(self):
 		"""Start streaming to the specified URL"""
+		if cv2 is None:
+			raise ImportError('OpenCV (cv2) is required for streaming')
+
 		if self.stream is not None:
 			self.stop_streaming()
 
 		# Initialize streaming (example using RTMP)
-		fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-		self.stream = cv2.VideoWriter(self.stream_url, fourcc, self.fps, (self.width, self.height))
+		fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # type: ignore[attr-defined]
+		self.stream = cv2.VideoWriter(self.stream_url, fourcc, self.fps, (self.width, self.height))  # type: ignore[attr-defined]
 		logger.info(f'Started streaming to {self.stream_url}')
 
 	def add_frame(self, frame: np.ndarray):
@@ -90,10 +96,17 @@ class LiveStreamer:
 			logger.info(f'Stopped streaming to {self.stream_url}')
 
 
-async def capture_screen(page) -> np.ndarray:
+async def capture_screen(page) -> 'np.ndarray':
 	"""Capture the current screen as a numpy array"""
+	if cv2 is None or np is None:
+		raise ImportError('OpenCV (cv2) and numpy are required for screen capture')
+
 	screenshot = await page.screenshot()
 	# Convert bytes to numpy array
-	nparr = np.frombuffer(screenshot, np.uint8)
-	frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+	nparr = np.frombuffer(screenshot, np.uint8)  # type: ignore[attr-defined]
+	frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)  # type: ignore[attr-defined]
+
+	if frame is None:
+		raise RuntimeError('Failed to decode screenshot')
+
 	return frame

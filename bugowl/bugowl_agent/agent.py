@@ -12,9 +12,11 @@ from browser_use import Agent
 from browser_use.browser import BrowserProfile
 from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
-from browser_use.utils import save_failure_screenshot
 
-from .utils import get_llm_model
+from .tasks import update_status_main
+from .utils import get_llm_model, save_failure_screenshot, upload_video_S3
+
+# from .video_recording_streaming import VideoRecording
 
 
 class AgentManager:
@@ -69,16 +71,17 @@ class AgentManager:
 		Initialize the AgentManager with default or user-provided configurations.
 
 		Args:
-		    headless (bool): Whether to run the browser in headless mode.
-		    browser_type (str): Type of browser to use (e.g., "chrome").
-		    llm_model (str): The model to use for the LLM (e.g., "gpt-4o").
-		    save_conversation_path (str): Path to save conversation logs.
-		    record_video_dir (str): Directory to save recorded videos.
-		    enable_memory (bool): Whether to enable memory for the agent.
-		    use_vision (bool): Whether to enable vision for the agent.
-		    cloud_sync (str): Cloud sync configuration (default: None).
-		    use_thinking (bool): Whether to enable thinking mode for the agent.
+			headless (bool): Whether to run the browser in headless mode.
+			browser_type (str): Type of browser to use (e.g., "chrome").
+			llm_model (str): The model to use for the LLM (e.g., "gpt-4o").
+			save_conversation_path (str): Path to save conversation logs.
+			record_video_dir (str): Directory to save recorded videos.
+			enable_memory (bool): Whether to enable memory for the agent.
+			use_vision (bool): Whether to enable vision for the agent.
+			cloud_sync (str): Cloud sync configuration (default: None).
+			use_thinking (bool): Whether to enable thinking mode for the agent.
 		"""
+
 		self._setup_logger()
 		self.logger.info('Initializing AgentManager...')
 		self.job_instance = job_instance
@@ -99,7 +102,7 @@ class AgentManager:
 		self.testtask_run = None
 		self.test_case_list = None
 		self.testtask_list = None
-
+		self.page = None
 		self.logger.info('AgentManager initialized successfully.')
 
 	def get_chrome_args(self):
@@ -158,6 +161,12 @@ class AgentManager:
 		if is_valid:
 			self.test_case_run = await sync_to_async(serializer.save)()
 			self.logger.info('Test case run data saved successfully.')
+			self.logger.info('Updating test case run status to RUNNING in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid),
+				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
+				test_case_status=self.test_case_run.status,
+			)
 			return True
 		else:
 			self.logger.error(f'Failed to save test case run data: {serializer.errors}', exc_info=True)
@@ -239,33 +248,65 @@ class AgentManager:
 		await self.browser_session.start()  # type: ignore
 		self.logger.info('Browser session started.')
 
+		if self.browser_session:
+			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
+				self.browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
+				await self.browser_session._show_dvd_screensaver_loading_animation(self.browser_session.browser_context.pages[0])
+			else:
+				self.browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
+
 	async def stop_browser_session(self):
 		"""
 		Stop the browser session.
 		"""
 		if self.browser_session:
+			self.page = await self.browser_session.get_current_page()
 			await self.browser_session.kill()
+			self.browser_session = None
 			self.logger.info('Browser session stopped.')
 
 	async def update_testtask_run(self, status):
 		"""
 		Update the test task run status.
 		"""
-		if self.testtask_run:
-			self.testtask_run.status = (
-				status if self.testtask_run.status == JobStatusEnum.RUNNING.value else self.testtask_run.status
-			)
-			await sync_to_async(self.testtask_run.save)(update_fields=['status'])
 
-	async def update_testcase_run(self, status):
+		if self.testtask_run:
+			update_fields = ['status', 'updated_at']
+			self.testtask_run.status = status
+			await sync_to_async(self.testtask_run.save)(update_fields=update_fields)
+
+	async def update_testcase_run(self, status, video_url=None, image_url=None):
 		"""
 		Update the test case run status.
 		"""
 		if self.test_case_run:
-			self.test_case_run.status = (
-				status if self.test_case_run.status == JobStatusEnum.RUNNING.value else self.test_case_run.status
+			update_fields = ['status', 'updated_at']
+			self.test_case_run.status = status
+			if video_url:
+				self.test_case_run.video = video_url
+				update_fields.append('video')
+			if image_url:
+				self.test_case_run.failure_screenshot = image_url
+				update_fields.append('failure_screenshot')
+			await sync_to_async(self.test_case_run.save)(update_fields=update_fields)
+			self.logger.info(f'Updating test case status to {status} in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid),
+				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
+				test_case_status=status,
 			)
-			await sync_to_async(self.test_case_run.save)(update_fields=['status'])
+
+	async def update_job_instance(self, status):
+		"""
+		Update the job instance status.
+		"""
+		if self.job_instance:
+			self.job_instance.status = status
+			await sync_to_async(self.job_instance.save)(update_fields=['status', 'updated_at'])
+			self.logger.info(f'Updating job status to {status} in the main server...')
+			update_status_main.delay(  # type: ignore
+				job_uuid=str(self.job_instance.job_uuid), job_status=status
+			)
 
 	async def run_test_case(self):
 		"""
@@ -277,18 +318,28 @@ class AgentManager:
 
 		self.logger.info('Running test cases...')
 
+		self.logger.info('updating job status to RUNNING')
+		await self.update_job_instance(status=JobStatusEnum.RUNNING.value)
+
 		try:
-			if not self.browser_session:
-				await self.start_browser_session()
-			self.logger.info('Browser session is ready. Starting test case execution...')
 			run_results = {}
 			for test_case in self.test_case_list:
 				self.logger.info(f'testcase name: {test_case["name"]}')
 				test_tasks = test_case.pop('test_task')
 				result = await self.save_testcase_run(test_case)
+
 				if result:
+					if not self.browser_session:
+						await self.start_browser_session()
+						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
+					else:
+						await self.stop_browser_session()
+						self.logger.info('Browser session stopped. Starting new browser session for next testcase...')
+						await self.start_browser_session()
+						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
 					run_results[self.test_case_run.name] = []  # type: ignore
+					image_url = None
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
 						test_task['test_case_run'] = self.test_case_run.id if self.test_case_run else None
@@ -301,46 +352,64 @@ class AgentManager:
 							sensitive_data = (
 								{self.testtask_run.test_data.get('name'): self.testtask_run.test_data.get('data')}  # type: ignore
 								if self.testtask_run.test_data  # type: ignore
-								else None
+								else {}
 							)
 
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
-							if not history.is_successful():
-								# Handle failure (e.g., take a screenshot)
-								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
-								await save_failure_screenshot(self.browser_session, str(self.test_case_run.test_case_uuid))  # type: ignore
-							else:
-								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
-
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
 
+							if not history.is_successful():
+								# Handle failure (e.g., take a screenshot)
+								image_url = await save_failure_screenshot(
+									self.browser_session,
+									self.logger,
+									str(self.job_instance.job_uuid),
+									str(self.test_case_run.test_case_uuid),  # type: ignore
+								)
+								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
+								break
+							else:
+								image_url = None
+								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
+
 						else:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
+							await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 							return
 
-							# After all test tasks for this test case are executed, check their results
+					# After all test tasks for this test case are executed, check their results
+					await self.stop_browser_session()
+					video_url = await upload_video_S3(
+						self.job_instance,
+						self.test_case_run,
+						await self.page.video.path() if self.page else None,  # type: ignore
+						self.logger,
+					)
 					task_results = run_results[self.test_case_run.name]  # type: ignore
 					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
-					await self.update_testcase_run(status=final_status)
+					await self.update_testcase_run(status=final_status, video_url=video_url, image_url=image_url)
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
+					await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 					return
-
 			return run_results
 		except Exception as e:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
+			await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 			raise
 		finally:
-			await self.stop_browser_session()
+			if self.browser_session:
+				await self.stop_browser_session()
 
-	async def run_task(self, task, sensitive_data=None):
+	async def run_task(self, task, sensitive_data={}):
 		"""
 		Run a single task using the Agent.
 		"""
 		if not self.agent:
+			self.logger.info(f'Sensitvie data: {sensitive_data}')
 			test_case_uuid = str(self.test_case_run.test_case_uuid)  # type: ignore
 			self.agent = Agent(
 				task=self.testtask_run.title,  # type: ignore
@@ -353,12 +422,12 @@ class AgentManager:
 				sensitive_data=sensitive_data,
 				cloud_sync=self.cloud_sync,
 				use_thinking=self.use_thinking,
-				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{test_case_uuid}/',
+				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{test_case_uuid}-{str(uuid.uuid4())}/',
 			)
 		else:
-			if sensitive_data:
+			if len(sensitive_data) > 0:
 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
-
+			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
 			self.agent.add_new_task(task)
 
 		history = await self.agent.run()
@@ -375,60 +444,15 @@ class AgentManager:
 			self.process_job_payload()
 			run_results = asyncio.run(self.run_test_case())
 			self.logger.info('Job completed.')
+			self.logger.info(f'Run results: {run_results}')
+
+			all_testcases_passed = all(
+				all(task_result['result'] == '✅ SUCCESSFUL' for task_result in tasks)
+				for tasks in run_results.values()  # type: ignore
+			)
+			final_job_status = JobStatusEnum.PASS_.value if all_testcases_passed else JobStatusEnum.FAILED.value
+			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except Exception as e:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
 			raise
-
-	# async def run_tasks(self, tasks, sensitive_data=None):
-	#     """
-	#     Run a list of tasks using the Agent.
-
-	#     Args:
-	#         tasks (list): List of tasks to execute.
-	#         sensitive_data (dict): Optional sensitive data for the tasks.
-
-	#     Returns:
-	#         list: Results of the executed tasks.
-	#     """
-	#     try:
-	#         if not self.browser_session:
-	#             await self.start_browser_session()
-
-	#         results = []
-	#         for count, task in enumerate(tasks, start=1):
-	#             task_id = str(uuid.uuid4())
-	#             if not self.agent:
-	#                 self.agent = Agent(
-	#                     task=task,
-	#                     task_id=task_id,
-	#                     llm=self.llm,
-	#                     browser_session=self.browser_session,
-	#                     enable_memory=self.enable_memory,
-	#                     save_conversation_path=self.save_conversation_path,
-	#                     use_vision=self.use_vision,
-	#                     sensitive_data=sensitive_data,
-	#                     cloud_sync=self.cloud_sync,
-	#                     use_thinking=self.use_thinking,
-	#                 )
-	#             else:
-	#                 self.agent.add_new_task(task)
-
-	#             self.logger.info(f"Executing Task #{count}: {task}")
-	#             history = await self.agent.run()
-	#             output = "✅ SUCCESSFUL" if history.is_successful() else "❌ FAILED!"
-	#             self.logger.info(f"Task #{count} Result: {output}")
-	#             results.append({"task": task, "result": output})
-
-	#             if not history.is_successful():
-	#                 # Handle failure (e.g., take a screenshot)
-	#                 from browser_use.utils import save_failure_screenshot
-	#                 await save_failure_screenshot(self.browser_session, task_id)
-	#                 break
-
-	#         return results
-	#     except Exception as e:
-	#         self.logger.error(f"Error executing tasks: {e}")
-	#         raise
-	#     finally:
-	#         await self.stop_browser_session()

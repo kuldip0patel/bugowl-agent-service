@@ -44,3 +44,13 @@ AgentHistory.json
 AgentHistoryList.json
 private_example.py
 private_example
+
+
+# Browser profiles and runtime data
+browser_profiles/
+bugowl/browser_profiles/
+videos/
+downloads/
+screenshots/
+*.mp4
+*.webm

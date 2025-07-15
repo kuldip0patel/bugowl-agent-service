@@ -30,6 +30,8 @@ class JWTAuthentication(BaseAuthentication):
 			raise AuthenticationFailed('Token has expired.')
 		except jwt.InvalidTokenError:
 			raise AuthenticationFailed('Invalid token.')
+		except Exception as e:
+			raise AuthenticationFailed(f'Error processing token: {str(e)}')
 
 		user_id = payload.get('user_id')
 		user_email = payload.get('user_email')
