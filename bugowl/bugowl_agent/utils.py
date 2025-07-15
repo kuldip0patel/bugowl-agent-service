@@ -1,4 +1,23 @@
+import base64
+import json
+import os
+import uuid
+from datetime import datetime
+
+import anyio
+import boto3
+from django.conf import settings
+
 from browser_use.llm import ChatAnthropic, ChatGoogle, ChatGroq, ChatOpenAI
+
+# aws configs
+s3_bucket = os.getenv('AWS_STORAGE_BUCKET_NAME')
+aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+region_name = os.getenv('AWS_S3_REGION_NAME')
+s3_custom_domain = os.getenv('AWS_S3_CUSTOM_DOMAIN')
+obj_params = os.getenv('AWS_S3_OBJECT_PARAMETERS')
+s3_object_parameters = json.loads(obj_params) if obj_params else None
 
 google_models = [
 	'gemini-2.0-flash',
@@ -96,10 +115,10 @@ def get_llm_model(model_name: str):
 	Returns the appropriate LLM model based on the provided model name.
 
 	Args:
-	    model_name (str): The name of the LLM model.
+		model_name (str): The name of the LLM model.
 
 	Returns:
-	    ChatOpenAI | ChatGoogle | ChatGroq | ChatAnthropic: The corresponding LLM model instance.
+		ChatOpenAI | ChatGoogle | ChatGroq | ChatAnthropic: The corresponding LLM model instance.
 	"""
 	if model_name in google_models:
 		return ChatGoogle(model=model_name)
@@ -111,3 +130,148 @@ def get_llm_model(model_name: str):
 		return ChatAnthropic(model=model_name)
 	else:
 		raise ValueError(f'Unsupported LLM model: {model_name}.')
+
+
+def get_video_filename(job_uuid, testcase_uuid, ext='mp4'):
+	timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+	uid = str(uuid.uuid4())
+	filename = f'{job_uuid}-{testcase_uuid}-{uid}_{timestamp}.{ext}'
+	return filename
+
+
+async def upload_video_S3(job_instance, test_case_run, video_path, logger):
+	"""
+	Upload the Playwright video recording for the current test case to S3.
+	This should be called after the browser session is stopped.
+	"""
+	try:
+		if not video_path:
+			logger.error('No video path to upload video.')
+			return None
+
+		# Generate new filename
+		new_filename = get_video_filename(job_instance.job_uuid, test_case_run.test_case_uuid)  # type: ignore
+		business_id = str(job_instance.business)
+		new_video_dir = os.path.join('videos', 'browser_recordings', business_id)
+		os.makedirs(new_video_dir, exist_ok=True)
+		new_video_path = os.path.join(new_video_dir, new_filename)
+
+		# Rename/move the video file
+		os.rename(video_path, new_video_path)
+		logger.info(f'Renamed video from {video_path} to {new_video_path}')
+
+		# Upload to S3
+		if not s3_bucket or not aws_access_key_id or not aws_secret_access_key or not region_name:
+			logger.error('S3 configuration is missing. Cannot upload video.')
+			return None
+
+		session = boto3.session.Session(  # type: ignore
+			aws_access_key_id=aws_access_key_id,
+			aws_secret_access_key=aws_secret_access_key,
+			region_name=region_name,
+		)
+		s3 = session.client('s3')
+		s3_key = f'videos/browser_recordings/{business_id}/{new_filename}'
+		extra_args = {}
+		if s3_object_parameters:
+			extra_args.update(s3_object_parameters)
+		try:
+			if 'LOCAL' != settings.ENV.upper():
+				s3.upload_file(new_video_path, s3_bucket, s3_key, ExtraArgs=extra_args)
+				logger.info(f'Upload to S3 successful: {s3_key}')
+			else:
+				logger.info(f'Skipping S3 upload in LOCAL environment: {s3_key}')
+		except Exception as e:
+			logger.error(f'Failed to upload video to S3: {e}')
+			return None
+		# Delete the local video file after successful upload
+		try:
+			if 'LOCAL' != settings.ENV.upper():
+				os.remove(new_video_path)
+				logger.info(f'Deleted local video file: {new_video_path}')
+			else:
+				logger.info(f'Skipping local file deletion in LOCAL environment: {new_video_path}')
+		except Exception as e:
+			logger.warning(f'Failed to delete local video file {new_video_path}: {e}')
+		if s3_custom_domain:
+			url = f'https://{s3_custom_domain}/{s3_key}'
+		else:
+			url = f'https://{s3_bucket}.s3.amazonaws.com/{s3_key}'
+		logger.info(f'S3 video URL: {url}')
+
+		return url
+
+	except Exception as e:
+		logger.error(f'Error in upload_video_S3: {e}', exc_info=True)
+		return None
+
+
+async def save_failure_screenshot(browser_session, logger, job_uuid, task_id: str) -> str | None:
+	"""
+	Take a screenshot of the current browser state and save it to a file.
+
+	Args:
+		browser_session: The browser session to take the screenshot from
+		task_id: The task ID to include in the filename
+
+	Returns:
+		str: The path to the saved screenshot file, or None if saving failed
+	"""
+
+	try:
+		screenshot_b64 = await browser_session.take_screenshot(full_page=True)
+		# Build the directory path: failure_screenshots/job_uuid
+		if not job_uuid:
+			job_uuid = str(uuid.uuid4())
+		if not task_id:
+			task_id = str(uuid.uuid4())
+		dir_path = os.path.join('failure_screenshots', str(job_uuid))
+		os.makedirs(dir_path, exist_ok=True)
+		filename = os.path.join(dir_path, f'{task_id}.png')
+
+		async with await anyio.open_file(filename, 'wb') as f:
+			await f.write(base64.b64decode(screenshot_b64))
+		logger.info(f'Saved failure screenshot to {filename}')
+
+		# Upload to S3
+		if not s3_bucket or not aws_access_key_id or not aws_secret_access_key or not region_name:
+			logger.error('S3 configuration is missing. Cannot upload screenshot.')
+			return None
+
+		session = boto3.session.Session(  # type: ignore
+			aws_access_key_id=aws_access_key_id,
+			aws_secret_access_key=aws_secret_access_key,
+			region_name=region_name,
+		)
+		s3 = session.client('s3')
+		s3_key = f'failure_screenshots/{job_uuid}/{task_id}.png'
+		extra_args = {}
+		if s3_object_parameters:
+			extra_args.update(s3_object_parameters)
+		try:
+			if 'LOCAL' != settings.ENV.upper():
+				s3.upload_file(filename, s3_bucket, s3_key, ExtraArgs=extra_args)
+				logger.info(f'Failure screenshot uploaded to S3: {s3_key}')
+			else:
+				logger.info(f'Skipping S3 upload in LOCAL environment: {s3_key}')
+		except Exception as e:
+			logger.error(f'Failed to upload failure screenshot to S3: {e}')
+			return None
+		# Delete the local screenshot file after successful upload
+		try:
+			if 'LOCAL' != settings.ENV.upper():
+				os.remove(filename)
+				logger.info(f'Deleted local screenshot file: {filename}')
+			else:
+				logger.info(f'Skipping local file deletion in LOCAL environment: {filename}')
+		except Exception as e:
+			logger.warning(f'Failed to delete local screenshot file {filename}: {e}')
+		if s3_custom_domain:
+			url = f'https://{s3_custom_domain}/{s3_key}'
+		else:
+			url = f'https://{s3_bucket}.s3.amazonaws.com/{s3_key}'
+		logger.info(f'S3 failure screenshot URL: {url}')
+		return url
+	except Exception as e:
+		logger.error(f'Failed to save screenshot: {str(e)}')
+		return None

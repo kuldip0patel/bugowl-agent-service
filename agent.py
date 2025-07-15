@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -13,8 +14,11 @@ from browser_use.browser import BrowserProfile
 from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
 from browser_use.llm import ChatGoogle, ChatOpenAI
+from bugowl.bugowl_agent.utils import save_failure_screenshot
 
 load_dotenv()
+
+logger = logging.getLogger('AgentManager')
 
 
 def get_chrome_args_for_automation():
@@ -114,9 +118,11 @@ async def run_tasks(tasks: list[str]):
 	my_browser_session = BrowserSession(browser_profile=browser_profile)
 
 	await my_browser_session.start()
-
-	# Create a new tab with animation
-	await my_browser_session.navigate('about:blank', new_tab=True)
+	if my_browser_session.browser_context and my_browser_session.browser_context.pages[0]:
+		my_browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
+		await my_browser_session._show_dvd_screensaver_loading_animation(my_browser_session.browser_context.pages[0])
+	else:
+		my_browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
 
 	print('BugOwl: BROWSER OPENED ALREADY!\n Starting the tasks now....')
 
@@ -167,9 +173,7 @@ async def run_tasks(tasks: list[str]):
 		results.append(res)
 		if not history.is_successful():
 			# Take a screenshot of the failed state
-			from browser_use.utils import save_failure_screenshot
-
-			await save_failure_screenshot(my_browser_session, test_run_uuid)
+			await save_failure_screenshot(my_browser_session, logger, None, test_run_uuid)
 			break
 	for res in results:
 		print(f'\033[94m{res}\033[0m')
@@ -180,6 +184,7 @@ async def run_tasks(tasks: list[str]):
 
 
 async def main():
+	logger.info('Testing logger....')
 	args = parse_args()
 	file_path = Path(args.file_path)
 	tasks = read_tasks(file_path)

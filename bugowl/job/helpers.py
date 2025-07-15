@@ -1,5 +1,8 @@
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 
+import jwt
 from api.utils import Browser
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
@@ -80,13 +83,21 @@ def validate_job_payload(data):
 	def validate_test_data(test_data):
 		if not test_data:
 			return
-		if not isinstance(test_data, dict):
-			raise ValidationError("'test_data' must be a dictionary mapping test data names to data values.")
-		for test_data_name, data_value in test_data.items():
-			if not isinstance(test_data_name, str):
-				raise ValidationError('Test data name must be a string.')
-			if not isinstance(data_value, dict):
-				raise ValidationError(f"Value for '{test_data_name}' must be a dictionary (key-value pairs).")
+		if not isinstance(test_data, list):
+			raise ValidationError("'test_data' must be a list of test data objects.")
+		for idx, td in enumerate(test_data):
+			if not isinstance(td, dict):
+				raise ValidationError(f"Each item in 'test_data' must be a dictionary. Error at index {idx}.")
+			required_fields = ['id', 'name', 'data']
+			for field in required_fields:
+				if field not in td:
+					raise ValidationError(f"Missing '{field}' in test_data at index {idx}.")
+			if not isinstance(td['id'], int):
+				raise ValidationError(f"'id' in test_data at index {idx} must be an integer.")
+			if not isinstance(td['name'], str):
+				raise ValidationError(f"'name' in test_data at index {idx} must be a string.")
+			if not isinstance(td['data'], dict):
+				raise ValidationError(f"'data' in test_data at index {idx} must be a dictionary.")
 
 	validate_job(data.get('job'))
 	validate_case_suite(data.get('test_case'), data.get('test_suite'))
@@ -265,7 +276,6 @@ def get_job_details(job_uuid):
 					'base_url': test_case_run.base_url,
 					'status': test_case_run.status,
 					'video': test_case_run.video,
-					'failure_screenshot': test_case_run.failure_screenshot,
 					'browser': test_case_run.browser,
 					'browser_session': test_case_run.browser_session,
 					'created_at': test_case_run.created_at,
@@ -341,3 +351,32 @@ def get_test_case_details(job_uuid, test_case_uuid):
 		response_data['test_tasks'].append(test_task_data)
 
 	return response_data
+
+
+def generate_agent_JWT_token(source='agent'):
+	"""
+	Generate a short-lived JWT token for a user.
+
+	Args:
+	    source : agent
+
+	Returns:
+	    str: Signed JWT token.
+	"""
+	secret_key = os.getenv('AGENT_SERVER_SECRET_KEY')  # Fetch the secret key from settings.CONFIG
+	if not secret_key:
+		raise ValueError('AGENT_SERVER_SECRET_KEY is not set in the environment variables.')
+
+	issuer = 'agent-BugOwl'  # Set the issuer (you can customize this)
+	expiration_time = datetime.now(timezone.utc) + timedelta(minutes=10)  # Token valid for 10 minutes
+	issued_at = datetime.now(timezone.utc)
+
+	payload = {
+		'source': source,  # Include the source in the payload
+		'exp': expiration_time,
+		'iat': issued_at,
+		'iss': issuer,
+	}
+
+	token = jwt.encode(payload, secret_key, algorithm='HS256')
+	return token, payload
