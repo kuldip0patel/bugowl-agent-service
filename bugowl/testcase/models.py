@@ -26,7 +26,7 @@ class TestCaseRun(models.Model):
 	environment = models.JSONField()  # plain text 50 chars #comes from main API
 	base_url = models.URLField(max_length=255)  # comes from main API
 	status = models.CharField(max_length=20, choices=JobStatusEnum.choices())  # Will be updated by background worker/user
-	video = models.URLField(null=True, blank=True)
+	video = models.CharField(max_length=511, null=True, blank=True)
 	failure_screenshot = models.URLField(null=True, blank=True)  # URL to the failure screenshot
 	llm = models.CharField(max_length=127, null=True, blank=True)
 	browser = models.CharField(max_length=20, choices=Browser.choices())

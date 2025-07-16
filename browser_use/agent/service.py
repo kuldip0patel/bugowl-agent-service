@@ -1382,6 +1382,10 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			await self.eventbus.stop(timeout=10.0)
 
 			# await self.close()  #BUGOWL: Not closing browser session at every task/step run but at the end of the test case.
+			# Close browser session if keep_alive is False or None (default behavior)
+			# Only keep alive if explicitly set to True
+			if self.browser_session and self.browser_session.browser_profile.keep_alive is not True:
+				await self.close()
 
 	@observe_debug()
 	@time_execution_async('--multi_act')
