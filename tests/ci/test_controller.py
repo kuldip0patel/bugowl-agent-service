@@ -1044,7 +1044,7 @@ class TestControllerIntegration:
 
 		# Core logic validation: Verify click was successful
 		assert result.extracted_content is not None
-		assert f'Clicked button with index {button_index}' in result.extracted_content, (
+		assert f'Successfully clicked div with index {button_index}' in result.extracted_content, (
 			f'Expected click confirmation in result content, got: {result.extracted_content}'
 		)
 		if button_text:

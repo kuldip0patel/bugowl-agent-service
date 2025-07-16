@@ -7,6 +7,8 @@ on:
 
 jobs:
   build_publish_image:
+    # Disable this workflow - set to false to prevent execution
+    if: false
     runs-on: ubuntu-latest
     permissions:
       packages: write
