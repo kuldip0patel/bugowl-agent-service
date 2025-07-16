@@ -18,7 +18,7 @@ class TestCaseRun(models.Model):
 	)  # Foreign key to the Job model, will be used to link test case runs
 	job_uuid = models.UUIDField()  # comes from main API
 	uuid = models.UUIDField(unique=True, default=uuid.uuid4)
-	test_case_uuid = models.UUIDField()  # comes from main API
+	test_case_uuid = models.UUIDField(db_index=True)  # comes from main API
 	name = models.TextField()  # Name of the test case, will be used for display purposes
 	priority = models.CharField(
 		max_length=20, choices=PRIORITY_CHOICES

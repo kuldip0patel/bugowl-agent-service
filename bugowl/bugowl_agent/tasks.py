@@ -31,7 +31,7 @@ def update_status_main(
 	try:
 		main_host = os.getenv('MAIN_SERVER_HOST', 'http://localhost:8000')
 		token, payload = generate_agent_JWT_token('agent')
-		response = HttpUtils.invoke_http_request_inner(
+		response = HttpUtils.make_http_call(
 			method=HttpMethod.POST,
 			url=f'{main_host}/api/job/status-update/',
 			headers={'Authorization': f'Token {token}'},

@@ -18,10 +18,14 @@ logger = logging.getLogger(settings.ENV)
 
 class ExecuteJob(APIView):
 	def post(self, request, *args, **kwargs):
+		logger.info('ExecuteJob POST request received from user: %s', request.user)
 		data = request.data
 		user = request.user
+		logger.info('Processing job execution request with data keys: %s', list(data.keys()) if data else [])
 		try:
+			logger.info('Validating job payload')
 			validate_job_payload(data)
+			logger.info('Job payload validation successful')
 		except ValidationError as e:
 			logger.error('Validation Error: %s', str(e))
 			return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -32,6 +36,7 @@ class ExecuteJob(APIView):
 				test_case_uuid = data.get('test_case')[0]['uuid'] if data.get('test_case') else None
 			else:
 				test_case_uuid = None
+			logger.info('Extracted job details - test_suite_uuid: %s, test_case_uuid: %s', test_suite_uuid, test_case_uuid)
 
 			job_data = {
 				'job_uuid': job_data['uuid'],
@@ -46,10 +51,13 @@ class ExecuteJob(APIView):
 				'experimental': job_data['experimental'],
 				'payload': data,
 			}
+			logger.info('Prepared job data for creation with UUID: %s, type: %s', job_data['job_uuid'], job_data['job_type'])
 
 			with transaction.atomic():
+				logger.info('Starting database transaction for job creation')
 				serializer = JobSerializer(data=job_data)
 				if not serializer.is_valid():
+					logger.error('Job serializer validation failed: %s', serializer.errors)
 					return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 				job_instance = serializer.save()
@@ -59,7 +67,9 @@ class ExecuteJob(APIView):
 				# This function will handle the creation of TestCaseRun and TestTaskRun instances
 				# test_cases = save_case_task_runs(job_instance)
 
+			logger.info('Queuing job execution for job ID: %s', job_instance.id)
 			execute_job.delay(job_instance.id)  # type: ignore
+			logger.info('Job execution queued successfully for UUID: %s', job_instance.job_uuid)
 
 			return Response({'message': 'Job created successfully, Executing the Job'}, status=status.HTTP_201_CREATED)
 		except ValueError as ve:
@@ -70,25 +80,47 @@ class ExecuteJob(APIView):
 			return Response({'error': 'Failed to create job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _handle_job_detail_request(request, job_uuid, is_public=False):
+	"""
+	Common helper method to handle job detail requests for both authenticated and public views.
+
+	Args:
+		request: The HTTP request object
+		job_uuid: The UUID of the job to fetch
+		is_public (bool): Whether this is a public request (affects logging messages)
+
+	Returns:
+		Response: Django REST framework Response object
+	"""
+	view_type = 'public' if is_public else 'authenticated'
+	logger.info('Job detail %s request received', view_type)
+
+	try:
+		logger.info('Fetching %s job details for UUID: %s', view_type, job_uuid)
+		if not job_uuid:
+			logger.warning('Job UUID not provided in %s request', view_type)
+			return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+		response_data = get_job_details(job_uuid)
+		logger.info('Successfully retrieved %s job details for UUID: %s', view_type, job_uuid)
+		return Response(response_data, status=status.HTTP_200_OK)
+
+	except Job.DoesNotExist:
+		logger.warning('Job not found for %s request with UUID: %s', view_type, job_uuid)
+		return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
+	except Exception as e:
+		logger.error('Error fetching job in %s request: %s', view_type, str(e), exc_info=True)
+		return Response({'error': 'Failed to fetch job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class JobDetailView(APIView):
 	"""
 	Job detail view to fetch job details, testcaserun, testtaskrun, and teststeprun details by Job UUID.
 	"""
 
 	def get(self, request, *args, **kwargs):
-		try:
-			job_uuid = kwargs.get('job_uuid')
-			if not job_uuid:
-				return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-			response_data = get_job_details(job_uuid)
-			return Response(response_data, status=status.HTTP_200_OK)
-
-		except Job.DoesNotExist:
-			return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
-		except Exception as e:
-			logger.error('Error fetching job: %s', str(e), exc_info=True)
-			return Response({'error': 'Failed to fetch job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+		job_uuid = kwargs.get('job_uuid')
+		return _handle_job_detail_request(request, job_uuid, is_public=False)
 
 
 class JobPublicDetailView(APIView):
@@ -100,20 +132,53 @@ class JobPublicDetailView(APIView):
 	authentication_classes = []
 
 	def get(self, request, *args, **kwargs):
-		try:
-			job_uuid = kwargs.get('job_uuid')
-			if not job_uuid:
-				return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
+		job_uuid = kwargs.get('job_uuid')
+		return _handle_job_detail_request(request, job_uuid, is_public=True)
 
-			response_data = get_job_details(job_uuid)
 
-			return Response(response_data, status=status.HTTP_200_OK)
+def _handle_test_case_detail_request(request, is_public=False):
+	"""
+	Common helper method to handle test case detail requests for both authenticated and public views.
 
-		except Job.DoesNotExist:
-			return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
-		except Exception as e:
-			logger.error('Error fetching job: %s', str(e), exc_info=True)
-			return Response({'error': 'Failed to fetch job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+	Args:
+		request: The HTTP request object
+		is_public (bool): Whether this is a public request (affects logging messages)
+
+	Returns:
+		Response: Django REST framework Response object
+	"""
+	view_type = 'public' if is_public else 'authenticated'
+	logger.info('Test case detail %s request received', view_type)
+
+	try:
+		job_uuid = request.query_params.get('job_uuid')
+		test_case_uuid = request.query_params.get('test_case_uuid')
+		logger.info('Fetching %s TestCaseRun for Job UUID: %s and Test Case UUID: %s', view_type, job_uuid, test_case_uuid)
+
+		if not job_uuid:
+			logger.warning('Job UUID not provided in %s test case detail request', view_type)
+			return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
+		elif not test_case_uuid:
+			logger.warning('Test Case UUID not provided in %s test case detail request', view_type)
+			return Response({'error': 'Test Case UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+		response_data = get_test_case_details(job_uuid, test_case_uuid)
+		logger.info(
+			'Successfully retrieved %s test case details for Job UUID: %s, Test Case UUID: %s',
+			view_type,
+			job_uuid,
+			test_case_uuid,
+		)
+
+		return Response(response_data, status=status.HTTP_200_OK)
+	except TestCaseRun.DoesNotExist:
+		logger.warning(
+			'TestCaseRun not found for %s request with Job UUID: %s, Test Case UUID: %s', view_type, job_uuid, test_case_uuid
+		)
+		return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
+	except Exception as e:
+		logger.error('Error fetching TestCaseRun in %s request: %s', view_type, str(e), exc_info=True)
+		return Response({'error': 'Failed to fetch TestCaseRun', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class JobTestCaseDetailView(APIView):
@@ -122,25 +187,7 @@ class JobTestCaseDetailView(APIView):
 	"""
 
 	def get(self, request, *args, **kwargs):
-		try:
-			job_uuid = request.query_params.get('job_uuid')
-			test_case_uuid = request.query_params.get('test_case_uuid')
-			logger.info('Fetching TestCaseRun for Job UUID: %s and Test Case UUID: %s', job_uuid, test_case_uuid)
-			if not job_uuid:
-				return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
-			elif not test_case_uuid:
-				return Response({'error': 'Test Case UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-			response_data = get_test_case_details(job_uuid, test_case_uuid)
-
-			return Response(response_data, status=status.HTTP_200_OK)
-		except TestCaseRun.DoesNotExist:
-			return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
-		except Exception as e:
-			logger.error('Error fetching TestCaseRun: %s', str(e), exc_info=True)
-			return Response(
-				{'error': 'Failed to fetch TestCaseRun', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
-			)
+		return _handle_test_case_detail_request(request, is_public=False)
 
 
 class JobTestCasePublicDetailView(APIView):
@@ -153,22 +200,4 @@ class JobTestCasePublicDetailView(APIView):
 	authentication_classes = []
 
 	def get(self, request, *args, **kwargs):
-		try:
-			job_uuid = request.query_params.get('job_uuid')
-			test_case_uuid = request.query_params.get('test_case_uuid')
-			logger.info('Fetching TestCaseRun for Job UUID: %s and Test Case UUID: %s', job_uuid, test_case_uuid)
-			if not job_uuid:
-				return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
-			elif not test_case_uuid:
-				return Response({'error': 'Test Case UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-			response_data = get_test_case_details(job_uuid, test_case_uuid)
-
-			return Response(response_data, status=status.HTTP_200_OK)
-		except TestCaseRun.DoesNotExist:
-			return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
-		except Exception as e:
-			logger.error('Error fetching TestCaseRun: %s', str(e), exc_info=True)
-			return Response(
-				{'error': 'Failed to fetch TestCaseRun', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
-			)
+		return _handle_test_case_detail_request(request, is_public=True)

@@ -17,8 +17,12 @@ logger = logging.getLogger(settings.ENV)
 
 
 def validate_job_payload(data):
+	logger.info('Starting job payload validation')
+
 	def validate_job(job):
+		logger.info('Validating job data structure')
 		if not job:
+			logger.error('Missing job field in payload')
 			raise ValidationError("Missing 'job' field.")
 		required_fields = [
 			'id',
@@ -36,82 +40,120 @@ def validate_job_payload(data):
 		]
 		for field in required_fields:
 			if field not in job:
+				logger.error('Missing required field in job: %s', field)
 				raise ValidationError(f"Missing '{field}' in job.")
 		if not isinstance(job['created_by'], dict):
+			logger.error('created_by field is not a dictionary')
 			raise ValidationError("'created_by' in job must be a dictionary.")
 		for field in ['id', 'full_name', 'email']:
 			if field not in job['created_by']:
+				logger.error('Missing field in job created_by: %s', field)
 				raise ValidationError(f"Missing '{field}' in job['created_by'].")
+		logger.info('Job data validation completed successfully')
 
 	def validate_case_suite(case, suite):
+		logger.info('Validating test case and test suite data')
 		if not (suite or case):
+			logger.error('Missing both test_suite and test_case fields')
 			raise ValidationError("Missing 'test_suite' and 'test_case' field.")
 		if case:
+			logger.info('Validating test case data with %d test cases', len(case) if isinstance(case, list) else 0)
 			if not isinstance(case, list):
+				logger.error('test_case field is not a list')
 				raise ValidationError("'test_case' must be a list.")
 			for test_case in case:
 				required_fields = ['id', 'uuid', 'test_suite', 'name', 'priority', 'browser', 'is_draft', 'test_task']
 				for field in required_fields:
 					if field not in test_case:
+						logger.error('Missing field in test_case: %s', field)
 						raise ValidationError(f"Missing '{field}' in test_case.")
 				if not isinstance(test_case['test_task'], list):
+					logger.error('test_task field is not a list in test_case')
 					raise ValidationError("'test_task' in test_case must be a list.")
+				logger.info(
+					'Validating %d test tasks for test case: %s', len(test_case['test_task']), test_case.get('name', 'unknown')
+				)
 				for idx, task in enumerate(test_case['test_task']):
 					required_fields = ['id', 'uuid', 'title', 'created_at', 'updated_at', 'created_by', 'test_data']
 					for field in required_fields:
 						if field not in task:
+							logger.error('Missing field in test_task at index %d: %s', idx, field)
 							raise ValidationError(f"Missing '{field}' in test_task at index {idx}.")
 					if not isinstance(task['created_by'], int):
+						logger.error('created_by field is not an integer in test_task at index %d', idx)
 						raise ValidationError(f"'created_by' in test_task at index {idx} must be an integer (user id).")
 					if task['test_data'] is not None and not isinstance(task['test_data'], int):
+						logger.error('test_data field is not an integer or null in test_task at index %d', idx)
 						raise ValidationError(f"'test_data' in test_task at index {idx} must be an integer or null.")
 		if suite:
+			logger.info('Validating test suite data')
 			if not isinstance(suite, dict):
+				logger.error('test_suite field is not a dictionary')
 				raise ValidationError("'test_suite' must be a dictionary.")
 			required_fields = ['id', 'name', 'description', 'language', 'priority', 'type']
 			for field in required_fields:
 				if field not in suite:
+					logger.error('Missing field in test_suite: %s', field)
 					raise ValidationError(f"Missing '{field}' in test_suite.")
 
+	logger.info('Test case and test suite validation completed successfully')
+
 	def validate_environment(environment):
+		logger.info('Validating environment data')
 		if not isinstance(environment, dict):
+			logger.error('environment field is not a dictionary')
 			raise ValidationError("'environment' must be a dictionary.")
 		required_fields = ['id', 'name', 'description', 'url']
 		for field in required_fields:
 			if field not in environment:
+				logger.error('Missing field in environment: %s', field)
 				raise ValidationError(f"Missing '{field}' in environment.")
+		logger.info('Environment validation completed successfully')
 
 	def validate_test_data(test_data):
+		logger.info('Validating test data')
 		if not test_data:
+			logger.info('No test data to validate')
 			return
 		if not isinstance(test_data, list):
+			logger.error('test_data field is not a list')
 			raise ValidationError("'test_data' must be a list of test data objects.")
+		logger.info('Validating %d test data items', len(test_data))
 		for idx, td in enumerate(test_data):
 			if not isinstance(td, dict):
+				logger.error('test_data item at index %d is not a dictionary', idx)
 				raise ValidationError(f"Each item in 'test_data' must be a dictionary. Error at index {idx}.")
 			required_fields = ['id', 'name', 'data']
 			for field in required_fields:
 				if field not in td:
+					logger.error('Missing field in test_data at index %d: %s', idx, field)
 					raise ValidationError(f"Missing '{field}' in test_data at index {idx}.")
 			if not isinstance(td['id'], int):
+				logger.error('id field is not an integer in test_data at index %d', idx)
 				raise ValidationError(f"'id' in test_data at index {idx} must be an integer.")
 			if not isinstance(td['name'], str):
+				logger.error('name field is not a string in test_data at index %d', idx)
 				raise ValidationError(f"'name' in test_data at index {idx} must be a string.")
 			if not isinstance(td['data'], dict):
+				logger.error('data field is not a dictionary in test_data at index %d', idx)
 				raise ValidationError(f"'data' in test_data at index {idx} must be a dictionary.")
+		logger.info('Test data validation completed successfully')
 
 	validate_job(data.get('job'))
 	validate_case_suite(data.get('test_case'), data.get('test_suite'))
 	validate_environment(data.get('environment'))
 	validate_test_data(data.get('test_data'))
+	logger.info('Job payload validation completed successfully')
 
 
 def save_case_task_runs(job_instance):
+	logger.info('Starting save_case_task_runs for job: %s', job_instance.job_uuid)
 	# Extract payload from the job instance
 	payload = job_instance.payload
 
 	# Extract test cases from the payload
 	test_cases = payload.get('test_case', [])
+	logger.info('Processing %d test cases for job: %s', len(test_cases), job_instance.job_uuid)
 	test_case_run_instance_list = []
 	for test_case in test_cases:
 		# Prepare data for TestCaseRun
@@ -176,12 +218,15 @@ def get_job_details(job_uuid):
 	Returns:
 	    dict: A dictionary containing job details and related test case, task, and step runs.
 	"""
+	logger.info('Fetching job details for UUID: %s', job_uuid)
 
 	# Fetch the Job instance
 	job = Job.objects.get(job_uuid=job_uuid)
+	logger.info('Found job with UUID: %s, type: %s, status: %s', job_uuid, job.job_type, job.status)
 
 	# Fetch all TestCaseRuns under the Job
 	test_case_runs = job.testcaserun_set.all()  # type: ignore
+	logger.info('Found %d test case runs for job: %s', test_case_runs.count(), job_uuid)
 
 	# Prepare the response structure
 	response_data = {
@@ -298,8 +343,10 @@ def get_test_case_details(job_uuid, test_case_uuid):
 	Returns:
 	    dict: A dictionary containing test task and step details.
 	"""
+	logger.info('Fetching test case details for job: %s, test case: %s', job_uuid, test_case_uuid)
 	# fetch the testcase run instance
 	test_case_run = TestCaseRun.objects.get(job_uuid=job_uuid, test_case_uuid=test_case_uuid)
+	logger.info('Found test case run with status: %s', test_case_run.status)
 
 	# Prepare the response structure
 	response_data = {
@@ -361,8 +408,10 @@ def generate_agent_JWT_token(source='agent'):
 	Returns:
 	    str: Signed JWT token.
 	"""
+	logger.info('Generating JWT token for source: %s', source)
 	secret_key = os.getenv('AGENT_SERVER_SECRET_KEY')  # Fetch the secret key from settings.CONFIG
 	if not secret_key:
+		logger.error('AGENT_SERVER_SECRET_KEY not found in environment variables')
 		raise ValueError('AGENT_SERVER_SECRET_KEY is not set in the environment variables.')
 
 	issuer = 'agent-BugOwl'  # Set the issuer (you can customize this)
@@ -377,4 +426,5 @@ def generate_agent_JWT_token(source='agent'):
 	}
 
 	token = jwt.encode(payload, secret_key, algorithm='HS256')
+	logger.info('JWT token generated successfully for source: %s, expires at: %s', source, expiration_time)
 	return token, payload
