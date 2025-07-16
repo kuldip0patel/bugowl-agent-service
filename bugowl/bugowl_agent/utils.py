@@ -6,6 +6,8 @@ from datetime import datetime
 
 import anyio
 import boto3
+import cv2
+from channels.layers import get_channel_layer
 from django.conf import settings
 
 from browser_use.llm import ChatAnthropic, ChatGoogle, ChatGroq, ChatOpenAI
@@ -275,3 +277,26 @@ async def save_failure_screenshot(browser_session, logger, job_uuid, task_id: st
 	except Exception as e:
 		logger.error(f'Failed to save screenshot: {str(e)}')
 		return None
+
+
+async def send_frame_to_websocket(logger, frame_data, job_uuid, user_id):
+	"""
+	Send a frame to the WebSocket group.
+
+	Args:
+		frame_data: The frame data to send.
+		job_uuid: The UUID of the job associated with the frame.
+		user_id: The ID of the user associated with the frame.
+	"""
+
+	try:
+		channel_layer = get_channel_layer()
+		if channel_layer:
+			_, buffer = cv2.imencode('.jpg', frame_data)
+			frame_data_b64 = base64.b64encode(buffer).decode('utf-8')
+
+			group_name = f'BrowserStreaming_{user_id}'
+
+			await channel_layer.group_send(group_name, {'type': 'browser_frame', 'frame': frame_data_b64, 'job_uuid': job_uuid})
+	except Exception as e:
+		logger.error(f'Failed to send frame to WebSocket: {e}', exc_info=True)

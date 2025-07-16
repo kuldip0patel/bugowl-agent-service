@@ -260,7 +260,6 @@ class AgentManager:
 		Stop the browser session.
 		"""
 		if self.browser_session:
-			self.page = await self.browser_session.get_current_page()
 			await self.browser_session.kill()
 			self.browser_session = None
 			self.logger.info('Browser session stopped.')
@@ -320,13 +319,13 @@ class AgentManager:
 
 		self.logger.info('updating job status to RUNNING')
 		await self.update_job_instance(status=JobStatusEnum.RUNNING.value)
-
+		run_results_case = {}
 		try:
-			run_results = {}
 			for test_case in self.test_case_list:
 				self.logger.info(f'testcase name: {test_case["name"]}')
 				test_tasks = test_case.pop('test_task')
 				result = await self.save_testcase_run(test_case)
+				run_results_task = {}
 
 				if result:
 					if not self.browser_session:
@@ -338,7 +337,6 @@ class AgentManager:
 						await self.start_browser_session()
 						self.logger.info('New Browser session is ready for next testcase. Starting test case execution...')
 					self.logger.info(f'Test case {test_case["name"]} saved successfully.')
-					run_results[self.test_case_run.name] = []  # type: ignore
 					image_url = None
 					for count, test_task in enumerate(test_tasks, start=1):
 						self.logger.info(f'Test task title: {test_task["title"]}')
@@ -357,7 +355,7 @@ class AgentManager:
 
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
-							run_results[self.test_case_run.name].append({'task': title, 'result': output})  # type: ignore
+							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore
 
 							if not history.is_successful():
 								# Handle failure (e.g., take a screenshot)
@@ -379,23 +377,28 @@ class AgentManager:
 							return
 
 					# After all test tasks for this test case are executed, check their results
+					self.page = await self.browser_session.get_current_page()  # type: ignore
+					video_url = await self.page.video.path() if self.page else None  # type: ignore
+					self.logger.info(f'Video URL: {video_url}')
 					await self.stop_browser_session()
 					video_url = await upload_video_S3(
 						self.job_instance,
 						self.test_case_run,
-						await self.page.video.path() if self.page else None,  # type: ignore
+						video_url,
 						self.logger,
 					)
-					task_results = run_results[self.test_case_run.name]  # type: ignore
-					all_success = all(task_result['result'] == '✅ SUCCESSFUL' for task_result in task_results)
+					task_results = run_results_task  # type: ignore
+					all_success = all(result == '✅ SUCCESSFUL' for result in task_results.values())
 					final_status = JobStatusEnum.PASS_.value if all_success else JobStatusEnum.FAILED.value
+					run_results_case[str(self.test_case_run.uuid)] = all_success  # type: ignore
+
 					await self.update_testcase_run(status=final_status, video_url=video_url, image_url=image_url)
 
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
 					await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 					return
-			return run_results
+
 		except Exception as e:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
 			await self.update_job_instance(status=JobStatusEnum.FAILED.value)
@@ -403,6 +406,7 @@ class AgentManager:
 		finally:
 			if self.browser_session:
 				await self.stop_browser_session()
+			return run_results_case
 
 	async def run_task(self, task, sensitive_data={}):
 		"""
@@ -445,11 +449,7 @@ class AgentManager:
 			run_results = asyncio.run(self.run_test_case())
 			self.logger.info('Job completed.')
 			self.logger.info(f'Run results: {run_results}')
-
-			all_testcases_passed = all(
-				all(task_result['result'] == '✅ SUCCESSFUL' for task_result in tasks)
-				for tasks in run_results.values()  # type: ignore
-			)
+			all_testcases_passed = all(run_results.values())  # type: ignore
 			final_job_status = JobStatusEnum.PASS_.value if all_testcases_passed else JobStatusEnum.FAILED.value
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
