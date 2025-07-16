@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from testcase.models import TestCaseRun
 
 from .helpers import get_job_details, get_test_case_details, validate_job_payload
 from .models import Job
@@ -133,8 +134,8 @@ class JobTestCaseDetailView(APIView):
 			response_data = get_test_case_details(job_uuid, test_case_uuid)
 
 			return Response(response_data, status=status.HTTP_200_OK)
-		except Job.DoesNotExist:
-			return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
+		except TestCaseRun.DoesNotExist:
+			return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
 		except Exception as e:
 			logger.error('Error fetching TestCaseRun: %s', str(e), exc_info=True)
 			return Response(
@@ -164,8 +165,8 @@ class JobTestCasePublicDetailView(APIView):
 			response_data = get_test_case_details(job_uuid, test_case_uuid)
 
 			return Response(response_data, status=status.HTTP_200_OK)
-		except Job.DoesNotExist:
-			return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
+		except TestCaseRun.DoesNotExist:
+			return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
 		except Exception as e:
 			logger.error('Error fetching TestCaseRun: %s', str(e), exc_info=True)
 			return Response(

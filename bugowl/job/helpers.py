@@ -7,6 +7,7 @@ from api.utils import Browser
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 from testask.serializers import TestTaskRunSerializer
+from testcase.models import TestCaseRun
 from testcase.serializers import TestCaseRunSerializer
 
 from .models import Job
@@ -297,58 +298,55 @@ def get_test_case_details(job_uuid, test_case_uuid):
 	Returns:
 	    dict: A dictionary containing test task and step details.
 	"""
-	# Fetch the Job instance
-	job = Job.objects.get(job_uuid=job_uuid, test_case_uuid=test_case_uuid)
-
-	# Fetch all TestCaseRuns under the Job
-	test_case_runs = job.testcaserun_set.all()  # type: ignore
+	# fetch the testcase run instance
+	test_case_run = TestCaseRun.objects.get(job_uuid=job_uuid, test_case_uuid=test_case_uuid)
 
 	# Prepare the response structure
 	response_data = {
 		'test_tasks': [],
 	}
-	for test_case_run in test_case_runs:
-		# Fetch all TestTaskRuns under the TestCaseRun
-		test_task_runs = test_case_run.testtaskrun_set.all()  # type: ignore[attr-defined]
-		test_task_data = []
-		for test_task_run in test_task_runs:
-			# Fetch all TestStepRuns under the TestTaskRun
-			test_step_runs = test_task_run.teststeprun_set.all()  # type: ignore[attr-defined]
-			test_step_data = [
-				{
-					'test_case_run': test_case_run.id,
-					'test_task_run': test_task_run.id,
-					'uuid': test_step_run.uuid,
-					'status': test_step_run.status,
-					'action': test_step_run.action,
-					'result': test_step_run.result,
-					# 'llm_input': test_step_run.llm_input,
-					'llm_output': test_step_run.llm_output,
-					# 'llm_input_tokens': test_step_run.llm_input_tokens,
-					# 'llm_output_tokens': test_step_run.llm_output_tokens,
-					# 'llm_thinking': test_step_run.llm_thinking,
-					'llm_time_taken': test_step_run.llm_time_taken,
-					'current_url': test_step_run.current_url,
-					'screenshot': test_step_run.screenshot,
-					'created_at': test_step_run.created_at,
-					'updated_at': test_step_run.updated_at,
-				}
-				for test_step_run in test_step_runs
-			]
-			test_task_data.append(
-				{
-					'uuid': test_task_run.uuid,
-					'test_case_run': test_case_run.id,
-					'test_task_uuid': test_task_run.test_task_uuid,
-					'title': test_task_run.title,
-					'status': test_task_run.status,
-					'test_data': test_task_run.test_data,
-					'created_at': test_task_run.created_at,
-					'updated_at': test_task_run.updated_at,
-					'test_steps': test_step_data,
-				}
-			)
-		response_data['test_tasks'].append(test_task_data)
+
+	# Fetch all TestTaskRuns under the TestCaseRun
+	test_task_runs = test_case_run.testtaskrun_set.all()  # type: ignore[attr-defined]
+	test_task_data = []
+	for test_task_run in test_task_runs:
+		# Fetch all TestStepRuns under the TestTaskRun
+		test_step_runs = test_task_run.teststeprun_set.all()  # type: ignore[attr-defined]
+		test_step_data = [
+			{
+				'test_case_run': test_case_run.id,  # type: ignore[attr-defined]
+				'test_task_run': test_task_run.id,
+				'uuid': test_step_run.uuid,
+				'status': test_step_run.status,
+				'action': test_step_run.action,
+				'result': test_step_run.result,
+				# 'llm_input': test_step_run.llm_input,
+				'llm_output': test_step_run.llm_output,
+				# 'llm_input_tokens': test_step_run.llm_input_tokens,
+				# 'llm_output_tokens': test_step_run.llm_output_tokens,
+				# 'llm_thinking': test_step_run.llm_thinking,
+				'llm_time_taken': test_step_run.llm_time_taken,
+				'current_url': test_step_run.current_url,
+				'screenshot': test_step_run.screenshot,
+				'created_at': test_step_run.created_at,
+				'updated_at': test_step_run.updated_at,
+			}
+			for test_step_run in test_step_runs
+		]
+		test_task_data.append(
+			{
+				'uuid': test_task_run.uuid,
+				'test_case_run': test_case_run.id,  # type: ignore[attr-defined]
+				'test_task_uuid': test_task_run.test_task_uuid,
+				'title': test_task_run.title,
+				'status': test_task_run.status,
+				'test_data': test_task_run.test_data,
+				'created_at': test_task_run.created_at,
+				'updated_at': test_task_run.updated_at,
+				'test_steps': test_step_data,
+			}
+		)
+	response_data['test_tasks'].append(test_task_data)
 
 	return response_data
 
