@@ -375,7 +375,7 @@ class AgentManager:
 								if self.testtask_run.test_data  # type: ignore
 								else {}
 							)
-							self.check_job_cancelled('run_test_case')
+							self.check_job_cancelled('run_test_case_taskLoop')
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore
