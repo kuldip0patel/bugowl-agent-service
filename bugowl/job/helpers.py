@@ -322,6 +322,7 @@ def get_job_details(job_uuid):
 					'base_url': test_case_run.base_url,
 					'status': test_case_run.status,
 					'video': test_case_run.video,
+					'failure_screenshot': test_case_run.failure_screenshot,
 					'browser': test_case_run.browser,
 					'browser_session': test_case_run.browser_session,
 					'created_at': test_case_run.created_at,
