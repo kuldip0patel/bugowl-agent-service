@@ -23,7 +23,6 @@ class ExecuteJob(APIView):
 	def post(self, request, *args, **kwargs):
 		logger.info('ExecuteJob POST request received from user: %s', request.user)
 		data = request.data
-		user = request.user
 		logger.info('Processing job execution request with data keys: %s', list(data.keys()) if data else [])
 		try:
 			logger.info('Validating job payload')
