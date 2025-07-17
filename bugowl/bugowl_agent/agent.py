@@ -17,8 +17,7 @@ from browser_use.browser.session import BrowserSession
 from .exceptions import JobCancelledException
 from .tasks import update_status_main
 from .utils import get_llm_model, save_failure_screenshot, upload_video_S3
-
-# from .video_recording_streaming import VideoRecording
+from .video_recording_streaming import LiveStreaming  # Import LiveStreaming
 
 
 class AgentManager:
@@ -105,6 +104,7 @@ class AgentManager:
 		self.test_case_list = None
 		self.testtask_list = None
 		self.page = None
+		self.live_streaming = None
 		self.logger.info('AgentManager initialized successfully.')
 
 	def get_chrome_args(self):
@@ -258,13 +258,18 @@ class AgentManager:
 
 	async def start_browser_session(self):
 		"""
-		Start the browser session.
+		Start the browser session and initialize LiveStreaming.
 		"""
 		self.check_job_cancelled('start_browser_session')
 		if not self.browser_session:
 			self.configure_browser()
 		await self.browser_session.start()  # type: ignore
 		self.logger.info('Browser session started.')
+
+		# Initialize and start LiveStreaming
+		self.live_streaming = LiveStreaming(agent_manager=self, fps=5)
+		await self.live_streaming.start()
+		self.logger.info('Live streaming started.')
 
 		if self.browser_session:
 			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
@@ -275,12 +280,20 @@ class AgentManager:
 
 	async def stop_browser_session(self):
 		"""
-		Stop the browser session.
+		Stop the browser session and LiveStreaming.
 		"""
+
+		# Stop LiveStreaming
+		if hasattr(self, 'live_streaming') and self.live_streaming.recording:  # type: ignore
+			await self.live_streaming.stop()  # type: ignore
+			self.live_streaming = None
+			self.logger.info('Live streaming stopped.')
+
 		if self.browser_session:
 			await self.browser_session.kill()
 			self.browser_session = None
 			self.logger.info('Browser session stopped.')
+
 		self.check_job_cancelled('stop_browser_session')
 
 	async def update_testtask_run(self, status):
@@ -481,6 +494,7 @@ class AgentManager:
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except JobCancelledException as e:
+			asyncio.run(self.stop_browser_session())
 			self.logger.info(f'Job cancelled from {e}')
 			self.logger.info('Job Cancelled from run_job')
 			current_test_case = self.test_case_run

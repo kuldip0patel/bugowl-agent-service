@@ -20,8 +20,9 @@ class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 			self.scope['user_email'] = user.get('user_email')
 			self.scope['user_first_name'] = user.get('first_name')
 			self.scope['user_last_name'] = user.get('last_name')
+			self.scope['user_business'] = user.get('business')
 
-			self.group_name = f'BrowserStreaming_{self.scope["user_id"]}'
+			self.group_name = f'BrowserStreaming_Business_{self.scope["user_business"]}'
 
 			await self.channel_layer.group_add(  # type: ignore
 				self.group_name, self.channel_name
@@ -62,5 +63,6 @@ class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 
 		try:
 			await self.send(text_data=json.dumps({'type': 'browser_frame', 'frame': frame_data, 'job_uuid': job_uuid}))
+			# logger.info(f'Frame sent to websocket grp')
 		except Exception as e:
 			logger.error(f'Error sending frame: {e}', exc_info=True)

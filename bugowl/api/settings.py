@@ -273,6 +273,21 @@ CACHES = {
 	}
 }
 
+CHANNEL_LAYERS = {
+	'default': {
+		'BACKEND': 'channels_redis.core.RedisChannelLayer',
+		'CONFIG': {
+			'hosts': [
+				{
+					'address': f'{os.getenv("DJANGO_CACHE_LOCATION")}',
+					'password': os.getenv('REDIS_AUTH_TOKEN', None),  # Optional: Redis authentication token
+				}
+			],
+			'expiry': 60,
+			'group_expiry': 86400,  # Optional: Group expiry time in seconds
+		},
+	}
+}
 
 LOGGING = {
 	'version': 1,

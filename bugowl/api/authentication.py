@@ -5,11 +5,12 @@ from rest_framework.exceptions import AuthenticationFailed
 
 
 class AuthenticatedUser:
-	def __init__(self, user_id, user_email, first_name, last_name, is_authenticated):
+	def __init__(self, user_id, user_email, first_name, last_name, business, is_authenticated):
 		self.user_id = user_id
 		self.user_email = user_email
 		self.first_name = first_name
 		self.last_name = last_name
+		self.business = business
 		self.is_authenticated = is_authenticated
 
 
@@ -37,12 +38,18 @@ class JWTAuthentication(BaseAuthentication):
 		user_email = payload.get('user_email')
 		first_name = payload.get('first_name')
 		last_name = payload.get('last_name')
+		business = payload.get('business')
 
-		if not all([user_id, user_email, first_name, last_name]):
+		if not all([user_id, user_email, first_name, last_name, business]):
 			raise AuthenticationFailed('Token payload is missing user details.')
 
 		user = AuthenticatedUser(
-			user_id=user_id, user_email=user_email, first_name=first_name, last_name=last_name, is_authenticated=True
+			user_id=user_id,
+			user_email=user_email,
+			first_name=first_name,
+			last_name=last_name,
+			business=business,
+			is_authenticated=True,
 		)
 
 		return (user, token)
