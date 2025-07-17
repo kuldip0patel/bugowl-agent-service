@@ -1,6 +1,8 @@
 import logging
 
+from api.utils import JobStatusEnum
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
@@ -8,10 +10,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from testcase.models import TestCaseRun
 
-from .helpers import get_job_details, get_test_case_details, validate_job_payload
+from .helpers import get_cancel_job_status_cache, get_job_details, get_test_case_details, validate_job_payload
 from .models import Job
 from .serializer import JobSerializer
 from .tasks import execute_job
+from .utils import get_cancel_cache_key
 
 logger = logging.getLogger(settings.ENV)
 
@@ -53,6 +56,12 @@ class ExecuteJob(APIView):
 			}
 			logger.info('Prepared job data for creation with UUID: %s, type: %s', job_data['job_uuid'], job_data['job_type'])
 
+			job_cache_status = get_cancel_job_status_cache(job_data['job_uuid'])
+
+			if job_cache_status and job_cache_status == JobStatusEnum.CANCELED.value:
+				logger.info('Job %s is already cancelled, skipping creation', job_data['job_uuid'])
+				return Response({'message': 'Job is already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+
 			with transaction.atomic():
 				logger.info('Starting database transaction for job creation')
 				serializer = JobSerializer(data=job_data)
@@ -63,9 +72,11 @@ class ExecuteJob(APIView):
 				job_instance = serializer.save()
 				logger.info('Job created successfully with UUID: %s', job_instance.job_uuid)
 
-				# Save TestCaseRun and TestTaskRun instances
-				# This function will handle the creation of TestCaseRun and TestTaskRun instances
-				# test_cases = save_case_task_runs(job_instance)
+			job_cache_status = get_cancel_job_status_cache(job_data['job_uuid'])
+
+			if job_cache_status and job_cache_status == JobStatusEnum.CANCELED.value:
+				logger.info('Job %s is cancelled, skipping execution', job_data['job_uuid'])
+				return Response({'message': 'Job is cancelled'}, status=status.HTTP_400_BAD_REQUEST)
 
 			logger.info('Queuing job execution for job ID: %s', job_instance.id)
 			execute_job.delay(job_instance.id)  # type: ignore
@@ -201,3 +212,27 @@ class JobTestCasePublicDetailView(APIView):
 
 	def get(self, request, *args, **kwargs):
 		return _handle_test_case_detail_request(request, is_public=True)
+
+
+class CancelJobAPIView(APIView):
+	"""
+	API view to cancel a job by its UUID.
+	"""
+
+	def post(self, request, *args, **kwargs):
+		job_uuid = request.data.get('job_uuid')
+		logger.info('CancelJobAPI POST request received for Job UUID: %s', job_uuid)
+
+		if not job_uuid:
+			logger.warning('Job UUID not provided in cancel request')
+			return Response({'error': 'Job UUID is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+		try:
+			cache_key = get_cancel_cache_key(job_uuid)
+			cache.set(cache_key, JobStatusEnum.CANCELED.value, timeout=2 * 24 * 60 * 60)
+
+			return Response({'message': 'Job cancelled successfully'}, status=status.HTTP_200_OK)
+
+		except Exception as e:
+			logger.error('Error cancelling job %s: %s', job_uuid, str(e), exc_info=True)
+			return Response({'error': 'Failed to cancel job', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

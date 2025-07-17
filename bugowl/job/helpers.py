@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from api.utils import Browser
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework.exceptions import ValidationError
 from testask.serializers import TestTaskRunSerializer
 from testcase.models import TestCaseRun
 from testcase.serializers import TestCaseRunSerializer
 
 from .models import Job
-from .utils import JobTypeEnum
+from .utils import JobTypeEnum, get_cancel_cache_key
 
 logger = logging.getLogger(settings.ENV)
 
@@ -322,6 +323,7 @@ def get_job_details(job_uuid):
 					'base_url': test_case_run.base_url,
 					'status': test_case_run.status,
 					'video': test_case_run.video,
+					'failure_screenshot': test_case_run.failure_screenshot,
 					'browser': test_case_run.browser,
 					'browser_session': test_case_run.browser_session,
 					'created_at': test_case_run.created_at,
@@ -428,3 +430,22 @@ def generate_agent_JWT_token(source='agent'):
 	token = jwt.encode(payload, secret_key, algorithm='HS256')
 	logger.info('JWT token generated successfully for source: %s, expires at: %s', source, expiration_time)
 	return token, payload
+
+
+def get_cancel_job_status_cache(job_uuid):
+	"""
+	Get the job status from cache.
+
+	Args:
+	    job_uuid (str): The UUID of the job.
+
+	Returns:
+	    str: The cached job status or None if not found.
+	"""
+	cache_key = get_cancel_cache_key(job_uuid)
+	status = cache.get(cache_key)
+	if status:
+		logger.info('Found cached job status for %s: %s', job_uuid, status)
+	else:
+		logger.info('No cached job status found for %s', job_uuid)
+	return status
