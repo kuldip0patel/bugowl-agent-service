@@ -494,6 +494,7 @@ class AgentManager:
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except JobCancelledException as e:
+			asyncio.run(self.stop_browser_session())
 			self.logger.info(f'Job cancelled from {e}')
 			self.logger.info('Job Cancelled from run_job')
 			current_test_case = self.test_case_run
