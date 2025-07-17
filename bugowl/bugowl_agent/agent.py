@@ -5,6 +5,7 @@ import uuid
 import coloredlogs
 from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
+from job.helpers import get_cancel_job_status_cache
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
 
@@ -13,6 +14,7 @@ from browser_use.browser import BrowserProfile
 from browser_use.browser.profile import get_display_size
 from browser_use.browser.session import BrowserSession
 
+from .exceptions import JobCancelledException
 from .tasks import update_status_main
 from .utils import get_llm_model, save_failure_screenshot, upload_video_S3
 
@@ -155,6 +157,7 @@ class AgentManager:
 		"""
 		Save the test case run data into the db.
 		"""
+		self.check_job_cancelled('save_testcase_run')
 		self.logger.info('Saving test case run data...')
 		serializer = TestCaseRunSerializer(data=test_case_run_data)
 		is_valid = await sync_to_async(serializer.is_valid)()
@@ -176,6 +179,7 @@ class AgentManager:
 		"""
 		Save the test task run data into the db.
 		"""
+		self.check_job_cancelled('save_testtask_run')
 		self.logger.info('Saving test task run data...')
 		serializer = TestTaskRunSerializer(data=test_task_run_data)
 		is_valid = await sync_to_async(serializer.is_valid)()
@@ -191,6 +195,8 @@ class AgentManager:
 		"""
 		Process and save the test case and test task run data.
 		"""
+		self.check_job_cancelled('process_job_payload')
+
 		self.logger.info('Processing job payload...')
 		payload = self.job_instance.payload
 
@@ -239,10 +245,22 @@ class AgentManager:
 		self.test_case_list = test_case_list
 		self.logger.info('Job payload processed successfully.')
 
+	def check_job_cancelled(self, exception_message):
+		"""
+		Check if the job is cancelled based on the cache status.
+		Raise JobCancelledException if the job is cancelled.
+		"""
+		job_status_cache = get_cancel_job_status_cache(self.job_instance.job_uuid)
+		if job_status_cache and job_status_cache == JobStatusEnum.CANCELED.value:
+			self.logger.info(f'Job {self.job_instance.job_uuid} is cancelled. {exception_message}')
+
+			raise JobCancelledException(f'{exception_message}')
+
 	async def start_browser_session(self):
 		"""
 		Start the browser session.
 		"""
+		self.check_job_cancelled('start_browser_session')
 		if not self.browser_session:
 			self.configure_browser()
 		await self.browser_session.start()  # type: ignore
@@ -263,6 +281,7 @@ class AgentManager:
 			await self.browser_session.kill()
 			self.browser_session = None
 			self.logger.info('Browser session stopped.')
+		self.check_job_cancelled('stop_browser_session')
 
 	async def update_testtask_run(self, status):
 		"""
@@ -300,6 +319,8 @@ class AgentManager:
 		Update the job instance status.
 		"""
 		if self.job_instance:
+			self.check_job_cancelled('update_job_instance')
+
 			self.job_instance.status = status
 			await sync_to_async(self.job_instance.save)(update_fields=['status', 'updated_at'])
 			self.logger.info(f'Updating job status to {status} in the main server...')
@@ -316,6 +337,8 @@ class AgentManager:
 			return
 
 		self.logger.info('Running test cases...')
+
+		self.check_job_cancelled('run_test_case')
 
 		self.logger.info('updating job status to RUNNING')
 		await self.update_job_instance(status=JobStatusEnum.RUNNING.value)
@@ -352,7 +375,7 @@ class AgentManager:
 								if self.testtask_run.test_data  # type: ignore
 								else {}
 							)
-
+							self.check_job_cancelled('run_test_case')
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore
@@ -370,7 +393,6 @@ class AgentManager:
 							else:
 								image_url = None
 								await self.update_testtask_run(status=JobStatusEnum.PASS_.value)
-
 						else:
 							self.logger.error(f'Failed to save test task {test_task["title"]}.', exc_info=True)
 							await self.update_job_instance(status=JobStatusEnum.FAILED.value)
@@ -393,12 +415,14 @@ class AgentManager:
 					run_results_case[str(self.test_case_run.uuid)] = all_success  # type: ignore
 
 					await self.update_testcase_run(status=final_status, video_url=video_url, image_url=image_url)
-
 				else:
 					self.logger.error(f'Failed to save test case {test_case["name"]}.', exc_info=True)
 					await self.update_job_instance(status=JobStatusEnum.FAILED.value)
 					return
-
+			self.logger.info('All test cases executed successfully.')
+		except JobCancelledException as e:
+			self.logger.info(f'Job cancelled from {e}')
+			raise JobCancelledException('run_test_case')
 		except Exception as e:
 			self.logger.error(f'Error running test cases: {e}', exc_info=True)
 			await self.update_job_instance(status=JobStatusEnum.FAILED.value)
@@ -415,6 +439,7 @@ class AgentManager:
 		if not self.agent:
 			self.logger.info(f'Sensitvie data: {sensitive_data}')
 			test_case_uuid = str(self.test_case_run.test_case_uuid)  # type: ignore
+			self.check_job_cancelled('run_task')
 			self.agent = Agent(
 				task=self.testtask_run.title,  # type: ignore
 				task_id=test_case_uuid,
@@ -432,6 +457,7 @@ class AgentManager:
 			if len(sensitive_data) > 0:
 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
 			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
+			self.check_job_cancelled('run_task')
 			self.agent.add_new_task(task)
 
 		history = await self.agent.run()
@@ -446,6 +472,7 @@ class AgentManager:
 		self.logger.info('Running job...')
 		try:
 			self.process_job_payload()
+
 			run_results = asyncio.run(self.run_test_case())
 			self.logger.info('Job completed.')
 			self.logger.info(f'Run results: {run_results}')
@@ -453,6 +480,22 @@ class AgentManager:
 			final_job_status = JobStatusEnum.PASS_.value if all_testcases_passed else JobStatusEnum.FAILED.value
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
+		except JobCancelledException as e:
+			self.logger.info(f'Job cancelled from {e}')
+			self.logger.info('Job Cancelled from run_job')
+			current_test_case = self.test_case_run
+			current_testtask = self.testtask_run
+			if current_test_case:
+				if current_test_case.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
+					self.logger.info(f'Updating test case {current_test_case.test_case_uuid} status to CANCELED')
+					current_test_case.status = JobStatusEnum.CANCELED.value
+					current_test_case.save(update_fields=['status', 'updated_at'])
+			if current_testtask:
+				if current_testtask.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
+					self.logger.info(f'Updating test task {current_testtask.testtask_uuid} status to CANCELED')
+					current_testtask.status = JobStatusEnum.CANCELED.value
+					current_testtask.save(update_fields=['status', 'updated_at'])
+			raise JobCancelledException('run_job')
 		except Exception as e:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
 			raise
