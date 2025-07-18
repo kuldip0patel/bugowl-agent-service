@@ -3,6 +3,7 @@ import base64
 
 from channels.layers import get_channel_layer
 from dotenv import load_dotenv
+from playwright._impl._errors import TargetClosedError
 
 
 class LiveStreaming:
@@ -33,6 +34,10 @@ class LiveStreaming:
 			screenshot = await page.screenshot()
 			frame_b64 = base64.b64encode(screenshot).decode('utf-8')
 			return frame_b64
+		except TargetClosedError:
+			if self.logger:
+				self.logger.error('Browser closed while capturing frame. Skipping frame capture.')
+			return None
 		except Exception as e:
 			if self.logger:
 				self.logger.error(f'Failed to capture frame: {e}', exc_info=True)
