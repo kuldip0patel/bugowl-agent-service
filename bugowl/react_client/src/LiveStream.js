@@ -9,6 +9,7 @@ const LiveStream = () => {
   const handleConnect = () => {
     if (token && !isConnected) {
       const wsUri = `ws://localhost:8020/agent/LiveStreaming/?token=${token}`;
+      //const wsUri = `wss://stg.bugowl.helpchat.social/agent/LiveStreaming/?token=${token}`;
       websocket.current = new WebSocket(wsUri);
 
       websocket.current.onopen = () => {

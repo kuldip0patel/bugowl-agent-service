@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import uuid
 
 import coloredlogs
@@ -59,7 +60,7 @@ class AgentManager:
 		job_instance,
 		headless=True,
 		browser_type=Browser.CHROME.value,
-		llm_model='gemini-2.5-flash',
+		llm_model=None,
 		save_conversation_path='logs/conversation',
 		record_video_dir='videos/',
 		enable_memory=True,
@@ -74,7 +75,8 @@ class AgentManager:
 		Args:
 			headless (bool): Whether to run the browser in headless mode.
 			browser_type (str): Type of browser to use (e.g., "chrome").
-			llm_model (str): The model to use for the LLM (e.g., "gpt-4o").
+			llm_model (str, optional): The model to use for the LLM (e.g., "gpt-4o").
+				If None, reads from LLM_MODEL environment variable or defaults to 'gemini-2.5-flash'.
 			save_conversation_path (str): Path to save conversation logs.
 			record_video_dir (str): Directory to save recorded videos.
 			enable_memory (bool): Whether to enable memory for the agent.
@@ -88,6 +90,12 @@ class AgentManager:
 		self.job_instance = job_instance
 		self.headless = headless
 		self.browser_type = browser_type if browser_type in Browser.choices() else Browser.CHROME.value
+
+		# Configure LLM model from environment variable or use provided/default value
+		if llm_model is None:
+			llm_model = os.getenv('LLM_MODEL', 'gemini-2.5-flash')
+		self.logger.info('Using LLM model: %s', llm_model)
+
 		self.llm = get_llm_model(llm_model)
 		self.llm_model = llm_model
 		self.save_conversation_path = save_conversation_path
@@ -267,7 +275,7 @@ class AgentManager:
 		self.logger.info('Browser session started.')
 
 		# Initialize and start LiveStreaming
-		self.live_streaming = LiveStreaming(agent_manager=self, fps=5)
+		self.live_streaming = LiveStreaming(agent_manager=self, fps=12)
 		await self.live_streaming.start()
 		self.logger.info('Live streaming started.')
 

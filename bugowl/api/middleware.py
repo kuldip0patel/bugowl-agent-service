@@ -1,9 +1,12 @@
+import logging
 from urllib.parse import parse_qs
 
 import jwt
 from channels.middleware import BaseMiddleware
 from django.conf import settings
 from jwt import ExpiredSignatureError, InvalidTokenError
+
+logger = logging.getLogger(settings.ENV)
 
 
 class JWTAuthMiddleware(BaseMiddleware):
@@ -12,7 +15,10 @@ class JWTAuthMiddleware(BaseMiddleware):
 	"""
 
 	async def __call__(self, scope, receive, send):
+		logger.info('JWTAuthMiddleware called for scope type: %s, path: %s', scope.get('type'), scope.get('path'))
+
 		token = self._get_token_from_scope(scope)
+		logger.info('Token extracted: %s', 'present' if token else 'missing')
 
 		if token:
 			try:
@@ -24,19 +30,24 @@ class JWTAuthMiddleware(BaseMiddleware):
 
 				scope['user'] = payload
 				scope['auth_error'] = None
+				logger.info('JWT authentication successful for user: %s', payload.get('user_email'))
 
 			except ExpiredSignatureError:
 				scope['user'] = None
 				scope['auth_error'] = 'Token has expired.'
+				logger.warning('JWT token expired')
 			except InvalidTokenError:
 				scope['user'] = None
 				scope['auth_error'] = 'Invalid token.'
+				logger.warning('Invalid JWT token')
 			except ValueError as e:
 				scope['user'] = None
 				scope['auth_error'] = str(e)
+				logger.warning('JWT validation error: %s', str(e))
 		else:
 			scope['user'] = None
 			scope['auth_error'] = 'Token not provided.'
+			logger.warning('No JWT token provided')
 
 		return await super().__call__(scope, receive, send)
 

@@ -9,11 +9,17 @@ logger = logging.getLogger(settings.ENV)
 
 class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 	async def connect(self):
+		logger.info('WebSocket connection attempt received')
+		logger.info('WebSocket scope path: %s', self.scope.get('path', 'unknown'))
+		logger.info('WebSocket scope query_string: %s', self.scope.get('query_string', b'').decode('utf-8'))
+
 		user = self.scope.get('user')
 		error = self.scope.get('auth_error')
 
+		logger.info('WebSocket auth - user: %s, error: %s', user, error)
+
 		if error:
-			logger.warning(f'WebSocket connection failed: {error}', exc_info=True)
+			logger.warning('WebSocket connection failed: %s', error)
 			await self.close(code=403, reason=error)
 		elif user:
 			self.scope['user_id'] = user.get('user_id')
@@ -28,10 +34,10 @@ class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 				self.group_name, self.channel_name
 			)
 			await self.accept()
-			logger.info(f'WebSocket connection established for user: {self.scope["user_email"]}')
+			logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 
 		else:
-			logger.error('WebSocket connection failed: Authorization header missing', exc_info=True)
+			logger.error('WebSocket connection failed: Authorization header missing')
 			await self.close(code=401, reason='Authorization header missing')
 
 	async def disconnect(self, close_code):

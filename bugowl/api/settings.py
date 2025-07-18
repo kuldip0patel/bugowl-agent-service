@@ -63,6 +63,8 @@ ALLOWED_HOSTS = [
 	'stg-bugowl.vercel.app',
 	'api',
 	'api-agent',
+	'localhost:3001',
+	'localhost:3000',
 ]
 
 
