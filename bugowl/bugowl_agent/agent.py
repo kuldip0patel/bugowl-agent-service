@@ -292,7 +292,7 @@ class AgentManager:
 		"""
 
 		# Stop LiveStreaming
-		if hasattr(self, 'live_streaming') and self.live_streaming.recording:  # type: ignore
+		if hasattr(self, 'live_streaming') and (self.live_streaming.recording if self.live_streaming else False):  # type: ignore
 			await self.live_streaming.stop()  # type: ignore
 			self.live_streaming = None
 			self.logger.info('Live streaming stopped.')

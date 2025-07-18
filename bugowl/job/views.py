@@ -185,7 +185,13 @@ def _handle_test_case_detail_request(request, is_public=False):
 		logger.warning(
 			'TestCaseRun not found for %s request with Job UUID: %s, Test Case UUID: %s', view_type, job_uuid, test_case_uuid
 		)
-		return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
+		response_data = {
+			'error': 'TestCaseRun not found',
+			'job_uuid': job_uuid,
+			'test_case_uuid': test_case_uuid,
+		}
+		return Response(response_data, status=status.HTTP_200_OK)
+		# return Response({'error': 'TestCaseRun not found'}, status=status.HTTP_404_NOT_FOUND)
 	except Exception as e:
 		logger.error('Error fetching TestCaseRun in %s request: %s', view_type, str(e), exc_info=True)
 		return Response({'error': 'Failed to fetch TestCaseRun', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
