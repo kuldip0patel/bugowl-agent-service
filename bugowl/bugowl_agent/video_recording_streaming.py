@@ -81,10 +81,10 @@ class LiveStreaming:
 							'current_url': current_url,
 							'job_uuid': str(self.job_instance.job_uuid),
 							'job_status': self.job_instance.status,
-							'task_uuid': str(self.testtask_run.test_task_uuid),
-							'task_status': self.testtask_run.status,
-							'case_uuid': str(self.test_case_run.test_case_uuid),
-							'case_status': self.test_case_run.status,
+							'task_uuid': (str(self.testtask_run.test_task_uuid) if self.testtask_run else None),
+							'task_status': (self.testtask_run.status if self.testtask_run else None),
+							'case_uuid': (str(self.test_case_run.test_case_uuid) if self.test_case_run else None),
+							'case_status': (self.test_case_run.status if self.test_case_run else None),
 						},
 					)
 
