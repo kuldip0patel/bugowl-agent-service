@@ -4,4 +4,5 @@ from websocket import consumers
 
 websocket_urlpatterns = [
 	re_path(r'agent/LiveStreaming/$', consumers.AgentLiveStreamingSocketConsumer.as_asgi()),  # type: ignore
+	re_path(r'agent/PlayGround/$', consumers.AgentPlayGroundSocketConsumer.as_asgi()),  # type: ignore
 ]
