@@ -35,15 +35,16 @@ class LiveStreaming:
 			# Taking a viewport screenshot is much faster than a full-page one.
 			screenshot = await page.screenshot()
 			frame_b64 = base64.b64encode(screenshot).decode('utf-8')
-			return frame_b64
+			current_url = page.url if page else None
+			return frame_b64, current_url
 		except TargetClosedError:
 			if self.logger:
 				self.logger.error('Browser closed while capturing frame. Skipping frame capture.')
-			return None
+			return None, None
 		except Exception as e:
 			if self.logger:
 				self.logger.error(f'Failed to capture frame: {e}', exc_info=True)
-			return None
+			return None, None
 
 	async def _stream_frames(self):
 		"""
@@ -55,6 +56,13 @@ class LiveStreaming:
 		group_name = f'BrowserStreaming_Business_{self.business_id}'
 
 		while self.recording:
+			# Check if the group has any active connections; if not, skip this iteration
+			if self.channel_layer:
+				group_channel_count = await self.channel_layer.group_channels(group_name)
+				if not group_channel_count:
+					await asyncio.sleep(0.1)
+					continue
+
 			if self.paused:
 				await asyncio.sleep(0.1)
 				continue
@@ -62,7 +70,7 @@ class LiveStreaming:
 			try:
 				start_time = asyncio.get_event_loop().time()
 
-				frame_b64 = await self._capture_frame()
+				frame_b64, current_url = await self._capture_frame()
 
 				if frame_b64 and self.channel_layer:
 					await self.channel_layer.group_send(
@@ -70,12 +78,13 @@ class LiveStreaming:
 						{
 							'type': 'send_frame',
 							'frame': frame_b64,
+							'current_url': current_url,
 							'job_uuid': str(self.job_instance.job_uuid),
 							'job_status': self.job_instance.status,
-							'task_uuid': str(self.testtask_run.test_task_uuid),
-							'task_status': self.testtask_run.status,
-							'case_uuid': str(self.test_case_run.test_case_uuid),
-							'case_status': self.test_case_run.status,
+							'task_uuid': (str(self.testtask_run.test_task_uuid) if self.testtask_run else None),
+							'task_status': (self.testtask_run.status if self.testtask_run else None),
+							'case_uuid': (str(self.test_case_run.test_case_uuid) if self.test_case_run else None),
+							'case_status': (self.test_case_run.status if self.test_case_run else None),
 						},
 					)
 
