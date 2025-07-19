@@ -6,7 +6,7 @@ from bugowl_agent.agent import PlayGroundAgent
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
-from .helpers import LOAD_TASK
+from .helpers import COMMAND_HANDLER
 from .utils import PLAYCOMMANDS
 
 logger = logging.getLogger(settings.ENV)
@@ -158,33 +158,8 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		try:
 			data = json.loads(text_data)
 
-			if not data.get('COMMANDS'):
-				logger.warning('No COMMANDS found in received data')
-				await self.send(
-					text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No COMMANDS found in received data'})
-				)
-				return
+			await COMMAND_HANDLER(self, data)
 
-			if data['COMMAND'] == PLAYCOMMANDS.LOAD_TASK.value:
-				if not data.get('ALL_TASK_DATA'):
-					logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
-					await self.send(
-						text_data=json.dumps(
-							{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
-						)
-					)
-				else:
-					logger.info('Processing LOAD_TASK command')
-					await LOAD_TASK(self, data['ALL_TASK_DATA'])
-			elif data['COMMAND'] == PLAYCOMMANDS.EXECUTE_ALL_TASKS.value:
-				pass
-			elif data['COMMAND'] == PLAYCOMMANDS.EXECUTE_TASK.value:
-				pass
-			elif data['COMMAND'] == PLAYCOMMANDS.STOP_TASK.value:
-				pass
-			else:
-				logger.error(f'Unknown command received: {data["COMMAND"]}')
-				await self.send(text_data=json.dumps({'ACK': 'S2C_ERROR', 'error': f'Unknown command: {data["COMMAND"]}'}))
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
 			await self.send(
