@@ -18,7 +18,9 @@ class LiveStreaming:
 		self.recording = False
 		self.paused = False
 		self.business_id = agent_manager.job_instance.business
-		self.job_uuid = agent_manager.job_instance.job_uuid
+		self.job_instance = agent_manager.job_instance
+		self.testtask_run = agent_manager.testtask_run
+		self.test_case_run = agent_manager.test_case_run
 
 		self.channel_layer = get_channel_layer()  # Get the channel layer for WebSocket communication
 		if self.logger:
@@ -64,7 +66,17 @@ class LiveStreaming:
 
 				if frame_b64 and self.channel_layer:
 					await self.channel_layer.group_send(
-						group_name, {'type': 'send_frame', 'frame': frame_b64, 'job_uuid': str(self.job_uuid)}
+						group_name,
+						{
+							'type': 'send_frame',
+							'frame': frame_b64,
+							'job_uuid': str(self.job_instance.job_uuid),
+							'job_status': self.job_instance.status,
+							'task_uuid': str(self.testtask_run.test_task_uuid),
+							'task_status': self.testtask_run.status,
+							'case_uuid': str(self.test_case_run.test_case_uuid),
+							'case_status': self.test_case_run.status,
+						},
 					)
 
 				# Adjust sleep time to maintain the target FPS
