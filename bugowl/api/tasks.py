@@ -26,7 +26,8 @@ def at_worker_ready(sender, **kwargs):
 
 	logger.info('Checking for queued jobs...')
 	queued_jobs = Job.objects.filter(status=JobStatusEnum.QUEUED.value)
-	for job in queued_jobs:
-		logger.info(f'Queued job found: {job.id}, scheduling for execution.')  # type: ignore
-		execute_job.delay(job.id)  # type: ignore
 	logger.info(f'Queued {queued_jobs.count()} jobs to celery worker on startup.')
+	for job in queued_jobs:
+		# logger.info(f'Queued job found: {job.id}, scheduling for execution.')  # type: ignore
+		execute_job.delay(job.id)  # type: ignore
+	
