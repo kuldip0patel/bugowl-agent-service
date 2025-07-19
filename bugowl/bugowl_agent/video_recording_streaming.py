@@ -55,6 +55,13 @@ class LiveStreaming:
 		group_name = f'BrowserStreaming_Business_{self.business_id}'
 
 		while self.recording:
+			# Check if the group has any active connections; if not, skip this iteration
+			if self.channel_layer:
+				group_channel_count = await self.channel_layer.group_channels(group_name)
+				if not group_channel_count:
+					await asyncio.sleep(0.1)
+					continue
+
 			if self.paused:
 				await asyncio.sleep(0.1)
 				continue
