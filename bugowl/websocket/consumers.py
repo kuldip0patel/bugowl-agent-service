@@ -59,6 +59,11 @@ class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 	async def send_frame(self, event):
 		frame_data = event.get('frame', None)
 		job_uuid = event.get('job_uuid', None)
+		job_status = event.get('job_status', None)
+		case_uuid = event.get('case_uuid', None)
+		case_status = event.get('case_status', None)
+		task_uuid = event.get('task_uuid', None)
+		task_status = event.get('task_status', None)
 		if not frame_data:
 			logger.warning('No frame to send')
 			return
@@ -68,7 +73,19 @@ class AgentWebSocketConsumer(AsyncWebsocketConsumer):
 			return
 
 		try:
-			await self.send(text_data=json.dumps({'type': 'browser_frame', 'frame': frame_data, 'job_uuid': job_uuid}))
-			# logger.info(f'Frame sent to websocket grp')
+			await self.send(
+				text_data=json.dumps(
+					{
+						'type': 'browser_frame',
+						'frame': frame_data,
+						'job_uuid': job_uuid,
+						'job_status': job_status,
+						'case_uuid': case_uuid,
+						'case_status': case_status,
+						'task_uuid': task_uuid,
+						'task_status': task_status,
+					}
+				)
+			)
 		except Exception as e:
 			logger.error(f'Error sending frame: {e}', exc_info=True)
