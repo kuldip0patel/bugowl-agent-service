@@ -8,7 +8,9 @@ class PLAYCOMMANDS(enum.Enum):
 	ACK_S2C_OK = 'S2C_OK'
 	EXECUTE_ALL_TASKS = 'EXECUTE_ALL_TASKS'
 	EXECUTE_TASK = 'EXECUTE_TASK'
-	STOP_TASK = 'STOP_TASK'
+	STOP = 'STOP'
+	PAUSE = 'PAUSE'
+	RESUME = 'RESUME'
 
 	@classmethod
 	def choices(cls):
