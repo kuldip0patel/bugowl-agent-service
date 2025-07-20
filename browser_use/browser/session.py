@@ -3238,6 +3238,7 @@ class BrowserSession(BaseModel):
 						focus_element=focus_element,
 						viewport_expansion=self.browser_profile.viewport_expansion,
 						highlight_elements=self.browser_profile.highlight_elements,
+						use_full_dom=self.browser_profile.use_full_dom,
 					),
 					timeout=45.0,  # 45 second timeout for DOM processing - generous for complex pages
 				)

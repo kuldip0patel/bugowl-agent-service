@@ -85,6 +85,7 @@ class AgentMessagePrompt:
 		sensitive_data: str | None = None,
 		available_file_paths: list[str] | None = None,
 		screenshots: list[str] | None = None,
+		use_full_dom: bool = False,
 	):
 		self.browser_state: 'BrowserStateSummary' = browser_state_summary
 		self.file_system: 'FileSystem | None' = file_system
@@ -98,6 +99,7 @@ class AgentMessagePrompt:
 		self.sensitive_data: str | None = sensitive_data
 		self.available_file_paths: list[str] | None = available_file_paths
 		self.screenshots = screenshots or []
+		self.use_full_dom = use_full_dom
 		assert self.browser_state
 
 	@observe_debug(name='_deduplicate_screenshots')
@@ -132,13 +134,21 @@ class AgentMessagePrompt:
 
 	@observe_debug(name='_get_browser_state_description')
 	def _get_browser_state_description(self) -> str:
-		elements_text = self.browser_state.element_tree.clickable_elements_to_string(include_attributes=self.include_attributes)
+		# Use full DOM or viewport-based DOM based on the flag
+		if self.use_full_dom:
+			elements_text = self.browser_state.element_tree.full_dom_to_string(include_attributes=self.include_attributes)
+			dom_type = 'full DOM tree'
+		else:
+			elements_text = self.browser_state.element_tree.clickable_elements_to_string(
+				include_attributes=self.include_attributes
+			)
+			dom_type = 'viewport-based DOM'
 
 		if len(elements_text) > self.max_clickable_elements_length:
 			elements_text = elements_text[: self.max_clickable_elements_length]
-			truncated_text = f' (truncated to {self.max_clickable_elements_length} characters)'
+			truncated_text = f' (truncated to {self.max_clickable_elements_length} characters from {dom_type})'
 		else:
-			truncated_text = ''
+			truncated_text = f' ({dom_type})'
 
 		has_content_above = (self.browser_state.pixels_above or 0) > 0
 		has_content_below = (self.browser_state.pixels_below or 0) > 0

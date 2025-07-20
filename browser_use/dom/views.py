@@ -167,6 +167,45 @@ class DOMElementNode(DOMBaseNode):
 		collect_text(self, 0)
 		return '\n'.join(text_parts).strip()
 
+	@time_execution_sync('--full_dom_to_string')
+	def full_dom_to_string(self, include_attributes: list[str] | None = None) -> str:
+		"""Convert the entire DOM tree to a string representation for LLM context."""
+		formatted_text = []
+
+		if not include_attributes:
+			include_attributes = DEFAULT_INCLUDE_ATTRIBUTES
+
+		def process_node(node: DOMBaseNode, depth: int) -> None:
+			depth_str = depth * '\t'
+
+			if isinstance(node, DOMElementNode):
+				# Include all interactive elements, not just those with highlight_index
+				if node.is_interactive or node.highlight_index is not None:
+					# Format: <tag_name id="..." class="..." [highlight_index]>
+					attrs = []
+					for attr in include_attributes:
+						if attr in node.attributes and node.attributes[attr]:
+							attrs.append(f'{attr}="{node.attributes[attr]}"')
+
+					attrs_str = ' ' + ' '.join(attrs) if attrs else ''
+					highlight_str = f' [{node.highlight_index}]' if node.highlight_index is not None else ''
+
+					formatted_text.append(f'{depth_str}<{node.tag_name}{attrs_str}{highlight_str}>')
+
+				# Process all children for full DOM
+				for child in node.children:
+					process_node(child, depth + 1)
+
+			elif isinstance(node, DOMTextNode) and node.is_visible:
+				# Include visible text content
+				text = node.text.strip()
+				if text:
+					formatted_text.append(f'{depth_str}"{text}"')
+
+		process_node(self, 0)
+
+		return '\n'.join(formatted_text)
+
 	@time_execution_sync('--clickable_elements_to_string')
 	def clickable_elements_to_string(self, include_attributes: list[str] | None = None) -> str:
 		"""Convert the processed DOM content to HTML."""

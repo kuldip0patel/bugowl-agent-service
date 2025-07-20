@@ -107,6 +107,7 @@ async def run_tasks(tasks: list[str], data):
 		user_data_dir=str(Path.home() / '.config' / 'browseruse' / 'profiles' / f'profile_{uuid.uuid4()}'),
 		# viewport_expansion=-1,
 		args=get_chrome_args_for_automation(),
+		use_full_dom=True,
 	)
 
 	my_browser_session = BrowserSession(browser_profile=browser_profile)

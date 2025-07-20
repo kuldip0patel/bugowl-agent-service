@@ -68,6 +68,7 @@ class AgentManager:
 		cloud_sync=None,
 		use_thinking=False,
 		highlight_elements=False,
+		use_full_dom=True,
 	):
 		"""
 		Initialize the AgentManager with default or user-provided configurations.
@@ -83,6 +84,7 @@ class AgentManager:
 			use_vision (bool): Whether to enable vision for the agent.
 			cloud_sync (str): Cloud sync configuration (default: None).
 			use_thinking (bool): Whether to enable thinking mode for the agent.
+			use_full_dom (bool): Whether to extract interactive elements from entire DOM instead of just viewport.
 		"""
 
 		self._setup_logger()
@@ -105,6 +107,7 @@ class AgentManager:
 		self.cloud_sync = cloud_sync
 		self.use_thinking = use_thinking
 		self.highlight_elements = highlight_elements
+		self.use_full_dom = use_full_dom
 		self.browser_session = None
 		self.agent = None
 		self.test_case_run = None

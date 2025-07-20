@@ -4,9 +4,15 @@
     focusHighlightIndex: -1,
     viewportExpansion: 0,
     debugMode: false,
+    useFullDom: false,
   }
 ) => {
-  const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
+  const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode, useFullDom } = args;
+
+  // Log DOM extraction mode for debugging
+  if (debugMode) {
+    console.log(`DOM extraction mode: ${useFullDom ? 'Full DOM' : 'Viewport-based'} (viewportExpansion: ${viewportExpansion})`);
+  }
   let highlightIndex = 0; // Reset highlight index
 
   // Add caching mechanisms at the top level
@@ -417,8 +423,8 @@
    */
   function isTextNodeVisible(textNode) {
     try {
-      // Special case: when viewportExpansion is -1, consider all text nodes as visible
-      if (viewportExpansion === -1) {
+      // Special case: when useFullDom is true or viewportExpansion is -1, consider all text nodes as visible
+      if (useFullDom || viewportExpansion === -1) {
         // Still check parent visibility for basic filtering
         const parentElement = textNode.parentElement;
         if (!parentElement) return false;
@@ -784,8 +790,8 @@
    * @returns {boolean} Whether the element is the topmost element at its position.
    */
   function isTopElement(element) {
-    // Special case: when viewportExpansion is -1, consider all elements as "top" elements
-    if (viewportExpansion === -1) {
+    // Special case: when useFullDom is true or viewportExpansion is -1, consider all elements as "top" elements
+    if (useFullDom || viewportExpansion === -1) {
       return true;
     }
 
@@ -870,7 +876,7 @@
    * @returns {boolean} Whether the element is within the expanded viewport.
    */
   function isInExpandedViewport(element, viewportExpansion) {
-    if (viewportExpansion === -1) {
+    if (useFullDom || viewportExpansion === -1) {
       return true;
     }
 
@@ -1138,11 +1144,12 @@
 
     if (shouldHighlight) {
       // Check viewport status before assigning index and highlighting
-      nodeData.isInViewport = isInExpandedViewport(node, viewportExpansion);
+      // Skip viewport check when useFullDom is true
+      nodeData.isInViewport = useFullDom ? true : isInExpandedViewport(node, viewportExpansion);
 
-      // When viewportExpansion is -1, all interactive elements should get a highlight index
+      // When useFullDom is true or viewportExpansion is -1, all interactive elements should get a highlight index
       // regardless of viewport status
-      if (nodeData.isInViewport || viewportExpansion === -1) {
+      if (useFullDom || nodeData.isInViewport || viewportExpansion === -1) {
         nodeData.highlightIndex = highlightIndex++;
 
         if (doHighlightElements) {
@@ -1236,7 +1243,8 @@
 
     // Early viewport check - only filter out elements clearly outside viewport
     // The getBoundingClientRect() of the Shadow DOM host element may return width/height = 0
-    if (viewportExpansion !== -1 && !node.shadowRoot) {
+    // Skip viewport filtering when useFullDom is true
+    if (viewportExpansion !== -1 && !useFullDom && !node.shadowRoot) {
       const rect = getCachedBoundingRect(node); // Keep for initial quick check
       const style = getCachedComputedStyle(node);
 

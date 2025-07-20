@@ -258,6 +258,7 @@ class MessageManager:
 		sensitive_data=None,
 		agent_history_list: AgentHistoryList | None = None,  # Pass AgentHistoryList from agent
 		available_file_paths: list[str] | None = None,  # Always pass current available_file_paths
+		use_full_dom: bool = False,  # Flag to use full DOM instead of viewport-based DOM
 	) -> None:
 		"""Add browser state as human message"""
 
@@ -290,6 +291,7 @@ class MessageManager:
 			sensitive_data=self.sensitive_data_description,
 			available_file_paths=available_file_paths,
 			screenshots=screenshots,
+			use_full_dom=use_full_dom,
 		).get_user_message(use_vision)
 
 		self._add_message_with_type(state_message, 'state')

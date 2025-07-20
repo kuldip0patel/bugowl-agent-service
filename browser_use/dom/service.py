@@ -40,8 +40,11 @@ class DomService:
 		highlight_elements: bool = True,
 		focus_element: int = -1,
 		viewport_expansion: int = 0,
+		use_full_dom: bool = False,
 	) -> DOMState:
-		element_tree, selector_map = await self._build_dom_tree(highlight_elements, focus_element, viewport_expansion)
+		element_tree, selector_map = await self._build_dom_tree(
+			highlight_elements, focus_element, viewport_expansion, use_full_dom
+		)
 		return DOMState(element_tree=element_tree, selector_map=selector_map)
 
 	@time_execution_async('--get_cross_origin_iframes')
@@ -68,6 +71,7 @@ class DomService:
 		highlight_elements: bool,
 		focus_element: int,
 		viewport_expansion: int,
+		use_full_dom: bool = False,
 	) -> tuple[DOMElementNode, SelectorMap]:
 		if await self.page.evaluate('1+1') != 2:
 			raise ValueError('The page cannot evaluate javascript code properly')
@@ -90,11 +94,16 @@ class DomService:
 		#       The returned hash map contains information about the DOM tree and the
 		#       relationship between the DOM elements.
 		debug_mode = self.logger.getEffectiveLevel() == logging.DEBUG
+
+		# When use_full_dom is True, set viewport_expansion to -1 to disable viewport filtering
+		effective_viewport_expansion = -1 if use_full_dom else viewport_expansion
+
 		args = {
 			'doHighlightElements': highlight_elements,
 			'focusHighlightIndex': focus_element,
-			'viewportExpansion': viewport_expansion,
+			'viewportExpansion': effective_viewport_expansion,
 			'debugMode': debug_mode,
+			'useFullDom': use_full_dom,
 		}
 
 		try:

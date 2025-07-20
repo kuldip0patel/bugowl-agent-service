@@ -727,6 +727,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			sensitive_data=self.sensitive_data,
 			agent_history_list=self.state.history,  # Pass AgentHistoryList for screenshots
 			available_file_paths=self.available_file_paths,  # Always pass current available_file_paths
+			use_full_dom=self.browser_profile.use_full_dom,  # Pass full DOM flag from browser profile
 		)
 
 		await self._handle_final_step(step_info)
