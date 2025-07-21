@@ -188,7 +188,7 @@ else:
 			'PASSWORD': os.getenv('BUGOWL_AGENT_DATABASE_PASSWORD'),
 			'HOST': os.getenv('BUGOWL_AGENT_DATABASE_HOST'),
 			'PORT': os.getenv('BUGOWL_AGENT_DATABASE_PORT'),
-			'CONN_MAX_AGE': 300,  # Keep connections open for 10 minutes
+			'CONN_MAX_AGE': 0,  # Keep connections open for 10 minutes
 		}
 	}
 
@@ -369,6 +369,9 @@ BROKER_URL = os.getenv('BROKER_URL', 'redis://redis-agent:6381/0')
 
 ELASTICACHE_HOST = os.getenv('ELASTICACHE_HOST', 'redis-agent')
 
+
+# Celery database settings
+CELERY_DATABASE_SHORT_LIVED_SESSIONS = True
 
 CELERY_BROKER_URL = BROKER_URL
 CELERY_RESULT_BACKEND = BROKER_URL

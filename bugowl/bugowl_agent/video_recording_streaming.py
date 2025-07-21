@@ -19,6 +19,7 @@ class LiveStreaming:
 		self.fps = fps
 		self.recording = False
 		self.paused = False
+		self.redis = None
 		if agent_manager.job_instance:
 			self.business_id = agent_manager.job_instance.business
 			self.job_instance = agent_manager.job_instance
@@ -99,13 +100,9 @@ class LiveStreaming:
 						'job_uuid': (
 							str(self.job_instance.job_uuid) if hasattr(self, 'job_instance') and self.job_instance else None
 						),
-						'job_status': (
-							self.job_instance.status if hasattr(self, 'job_instance') and self.job_instance else None
-						),
+						'job_status': (self.job_instance.status if hasattr(self, 'job_instance') and self.job_instance else None),
 						'task_uuid': (
-							str(self.testtask_run.test_task_uuid)
-							if hasattr(self, 'testtask_run') and self.testtask_run
-							else None
+							str(self.testtask_run.test_task_uuid) if hasattr(self, 'testtask_run') and self.testtask_run else None
 						),
 						'task_status': (
 							self.testtask_run.status if hasattr(self, 'testtask_run') and self.testtask_run else None
@@ -150,7 +147,7 @@ class LiveStreaming:
 				self.logger.warning('Streaming already in progress.')
 			return
 		try:
-			if (hasattr(self,'redis') and self.redis is None) and (hasattr(self,'group_name') and self.group_name):
+			if (hasattr(self, 'redis') and self.redis is None) and (hasattr(self, 'group_name') and self.group_name):
 				# Initialize Redis connection if not already done
 				redis_url = os.getenv('DJANGO_CACHE_LOCATION', 'redis://redis-agent:6381/1')
 				self.redis = redis.from_url(redis_url)

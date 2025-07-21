@@ -5,6 +5,21 @@ from django.conf import settings
 
 logger = logging.getLogger(settings.ENV)
 
+from celery.signals import task_postrun, task_prerun
+from django.db import connection
+
+
+@task_prerun.connect
+def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
+	"""Close database connections before task execution"""
+	connection.close()
+
+
+@task_postrun.connect
+def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kwds):
+	"""Close database connections after task execution"""
+	connection.close()
+
 
 @shared_task
 def health_check_task():
