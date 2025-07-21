@@ -490,18 +490,16 @@ class AgentManager:
 			self.logger.info(f'Cache key {key} deleted successfully.')
 			self.logger.info(f'Job cancelled from {e}')
 			self.logger.info('Job Cancelled from run_job')
-			current_test_case = self.test_case_run
-			current_testtask = self.testtask_run
-			if current_test_case:
-				if current_test_case.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
-					self.logger.info(f'Updating test case {current_test_case.test_case_uuid} status to CANCELED')
-					current_test_case.status = JobStatusEnum.CANCELED.value
-					current_test_case.save(update_fields=['status', 'updated_at'])
-			if current_testtask:
-				if current_testtask.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
-					self.logger.info(f'Updating test task {current_testtask.testtask_uuid} status to CANCELED')
-					current_testtask.status = JobStatusEnum.CANCELED.value
-					current_testtask.save(update_fields=['status', 'updated_at'])
+			if self.test_case_run:
+				if self.test_case_run.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
+					self.logger.info(f'Updating test case {self.test_case_run.test_case_uuid} status to CANCELED')
+					self.test_case_run.status = JobStatusEnum.CANCELED.value
+					self.test_case_run.save(update_fields=['status', 'updated_at'])
+			if self.testtask_run:
+				if self.testtask_run.status not in [JobStatusEnum.PASS_.value, JobStatusEnum.FAILED.value]:
+					self.logger.info(f'Updating test task {self.testtask_run.testtask_uuid} status to CANCELED')
+					self.testtask_run.status = JobStatusEnum.CANCELED.value
+					self.testtask_run.save(update_fields=['status', 'updated_at'])
 			asyncio.run(self.stop_browser_session())
 			raise JobCancelledException('run_job')
 		except Exception as e:
