@@ -6,7 +6,9 @@ import uuid
 import coloredlogs
 from api.utils import Browser, JobStatusEnum
 from asgiref.sync import sync_to_async
+from django.core.cache import cache
 from job.helpers import get_cancel_job_status_cache
+from job.utils import get_cancel_cache_key
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
 
@@ -483,7 +485,9 @@ class AgentManager:
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except JobCancelledException as e:
-			asyncio.run(self.stop_browser_session())
+			key = get_cancel_cache_key(self.job_instance.job_uuid)
+			cache.delete(key)
+			self.logger.info(f'Cache key {key} deleted successfully.')
 			self.logger.info(f'Job cancelled from {e}')
 			self.logger.info('Job Cancelled from run_job')
 			current_test_case = self.test_case_run
@@ -498,6 +502,7 @@ class AgentManager:
 					self.logger.info(f'Updating test task {current_testtask.testtask_uuid} status to CANCELED')
 					current_testtask.status = JobStatusEnum.CANCELED.value
 					current_testtask.save(update_fields=['status', 'updated_at'])
+			asyncio.run(self.stop_browser_session())
 			raise JobCancelledException('run_job')
 		except Exception as e:
 			self.logger.error(f'Error running job: {e}', exc_info=True)
