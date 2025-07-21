@@ -23,6 +23,20 @@ from .utils import CHROME_ARGS, get_llm_model, save_failure_screenshot, upload_v
 from .video_recording_streaming import LiveStreaming  # Import LiveStreaming
 
 
+class PlayGroundTask:
+	"""
+	A simple task class to encapsulate task-related data.
+	"""
+
+	def __init__(self, uuid, title, data=None):
+		self.uuid = uuid
+		self.title = title
+		self.test_data = data
+
+	def __str__(self):
+		return f'Task(uuid={self.uuid}, title={self.title})'
+
+
 class AgentManager:
 	def _setup_logger(self):
 		"""
@@ -59,7 +73,7 @@ class AgentManager:
 
 	def __init__(
 		self,
-		job_instance,
+		job_instance=None,
 		headless=True,
 		browser_type=Browser.CHROME.value,
 		llm_model=None,
@@ -70,6 +84,7 @@ class AgentManager:
 		cloud_sync=None,
 		use_thinking=False,
 		highlight_elements=False,
+		channel_name=None,
 	):
 		"""
 		Initialize the AgentManager with default or user-provided configurations.
@@ -115,6 +130,11 @@ class AgentManager:
 		self.testtask_list = None
 		self.page = None
 		self.live_streaming = None
+		self.channel_name = channel_name
+		self.group_name = None
+
+		self.task_id = None
+
 		self.logger.info('AgentManager initialized successfully.')
 
 	def get_chrome_args(self):
@@ -157,7 +177,7 @@ class AgentManager:
 			self.logger.info('Test case run data saved successfully.')
 			self.logger.info('Updating test case run status to RUNNING in the main server...')
 			update_status_main.delay(  # type: ignore
-				job_uuid=str(self.job_instance.job_uuid),
+				job_uuid=str(self.job_instance.job_uuid),  # type: ignore
 				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
 				test_case_status=self.test_case_run.status,
 			)
@@ -189,7 +209,7 @@ class AgentManager:
 		self.check_job_cancelled('process_job_payload')
 
 		self.logger.info('Processing job payload...')
-		payload = self.job_instance.payload
+		payload = self.job_instance.payload  # type: ignore
 
 		test_case_list = []
 
@@ -197,8 +217,8 @@ class AgentManager:
 		test_cases = payload.get('test_case', [])
 		for test_case in test_cases:
 			test_case_data = {
-				'job': self.job_instance.id,  # Link to the Job instance
-				'job_uuid': self.job_instance.job_uuid,
+				'job': self.job_instance.id,  # type:ignore # Link to the Job instance
+				'job_uuid': self.job_instance.job_uuid,  # type: ignore
 				'test_case_uuid': test_case['uuid'],
 				'name': test_case['name'],
 				'priority': test_case['priority'],
@@ -207,7 +227,7 @@ class AgentManager:
 				'status': JobStatusEnum.RUNNING.value,
 				'browser': test_case['browser'] if test_case['browser'] else Browser.CHROME.value,
 				'is_headless': self.headless,
-				'created_by': self.job_instance.created_by,
+				'created_by': self.job_instance.created_by,  # type: ignore
 			}
 			self.logger.info(f'Processing test Tasks for test case: {test_case["name"]}...')
 			test_tasks = test_case.get('test_task', [])
@@ -241,6 +261,9 @@ class AgentManager:
 		Check if the job is cancelled based on the cache status.
 		Raise JobCancelledException if the job is cancelled.
 		"""
+		if not self.job_instance:
+			self.logger.warning('Job instance is not set. Cannot check job cancellation status.')
+			return
 		job_status_cache = get_cancel_job_status_cache(self.job_instance.job_uuid)
 		if job_status_cache and job_status_cache == JobStatusEnum.CANCELED.value:
 			self.logger.info(f'Job {self.job_instance.job_uuid} is cancelled. {exception_message}')
@@ -258,7 +281,12 @@ class AgentManager:
 		self.logger.info('Browser session started.')
 
 		# Initialize and start LiveStreaming
-		self.live_streaming = LiveStreaming(agent_manager=self, fps=12)
+		if not self.channel_name:
+			self.group_name = f'BrowserStreaming_Business_{self.job_instance.business}'  # type: ignore
+
+		self.live_streaming = LiveStreaming(
+			agent_manager=self, channel_name=self.channel_name, group_name=self.group_name, fps=12
+		)
 		await self.live_streaming.start()
 		self.logger.info('Live streaming started.')
 
@@ -313,7 +341,7 @@ class AgentManager:
 			await sync_to_async(self.test_case_run.save)(update_fields=update_fields)
 			self.logger.info(f'Updating test case status to {status} in the main server...')
 			update_status_main.delay(  # type: ignore
-				job_uuid=str(self.job_instance.job_uuid),
+				job_uuid=str(self.job_instance.job_uuid),  # type: ignore
 				test_case_uuid=str(self.test_case_run.test_case_uuid),  # type: ignore
 				test_case_status=status,
 			)
@@ -380,6 +408,7 @@ class AgentManager:
 								else {}
 							)
 							self.check_job_cancelled('run_test_case_taskLoop')
+							self.task_id = str(self.test_case_run.test_case_uuid)  # type: ignore
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore
@@ -389,7 +418,7 @@ class AgentManager:
 								image_url = await save_failure_screenshot(
 									self.browser_session,
 									self.logger,
-									str(self.job_instance.job_uuid),
+									str(self.job_instance.job_uuid),  # type: ignore
 									str(self.test_case_run.test_case_uuid),  # type: ignore
 								)
 								await self.update_testtask_run(status=JobStatusEnum.FAILED.value)
@@ -441,12 +470,11 @@ class AgentManager:
 		Run a single task using the Agent.
 		"""
 		if not self.agent:
-			self.logger.info(f'Sensitvie data: {sensitive_data}')
-			test_case_uuid = str(self.test_case_run.test_case_uuid)  # type: ignore
+			self.logger.info(f'Sensitive data: {sensitive_data}')
 			self.check_job_cancelled('run_task')
 			self.agent = Agent(
 				task=self.testtask_run.title,  # type: ignore
-				task_id=test_case_uuid,
+				task_id=self.task_id,
 				llm=self.llm,
 				browser_session=self.browser_session,
 				enable_memory=self.enable_memory,
@@ -455,7 +483,7 @@ class AgentManager:
 				sensitive_data=sensitive_data,
 				cloud_sync=self.cloud_sync,
 				use_thinking=self.use_thinking,
-				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{test_case_uuid}-{str(uuid.uuid4())}/',
+				file_system_path=f'/app/bugowl/browser_data/browser_user_agent{self.task_id}-{str(uuid.uuid4())}/',
 			)
 		else:
 			if len(sensitive_data) > 0:
@@ -475,6 +503,9 @@ class AgentManager:
 		"""
 		self.logger.info('Running job...')
 		try:
+			if self.job_instance is None:
+				self.logger.error('Job instance is not set. Cannot run job.')
+				return
 			self.process_job_payload()
 
 			run_results = asyncio.run(self.run_test_case())
@@ -485,7 +516,7 @@ class AgentManager:
 			asyncio.run(self.update_job_instance(status=final_job_status))
 			return run_results
 		except JobCancelledException as e:
-			key = get_cancel_cache_key(self.job_instance.job_uuid)
+			key = get_cancel_cache_key(self.job_instance.job_uuid)  # type: ignore
 			cache.delete(key)
 			self.logger.info(f'Cache key {key} deleted successfully.')
 			self.logger.info(f'Job cancelled from {e}')
@@ -507,173 +538,23 @@ class AgentManager:
 			raise
 
 
-class Task:
+# AgentManager for Playground Tasks
+
+
+class PlayGroundAgentManager(AgentManager):
 	"""
-	A simple task class to encapsulate task-related data.
+	AgentManager for managing tasks in the playground.
 	"""
 
-	def __init__(self, uuid, title, data=None):
-		self.uuid = uuid
-		self.title = title
-		self.test_data = data
-
-	def __str__(self):
-		return f'Task(uuid={self.uuid}, title={self.title})'
-
-
-class PlayGroundAgent:
-	def _setup_logger(self):
+	def __init__(self, task_id, channel_name, **kwargs):
 		"""
-		Set up a custom logger for the AgentManager class with colored logs.
+		Initialize the PlaygroundAgentManager with default or user-provided configurations.
 		"""
-
-		self.logger = logging.getLogger('PlayGroundAgent')
-		self.logger.setLevel(logging.DEBUG)
-
-		self.logger.propagate = False
-
-		# Create a colored formatter
-		coloredlogs.install(
-			level='DEBUG',
-			logger=self.logger,
-			fmt='%(asctime)s [%(name)s] - [%(levelname)s] %(pathname)s:%(lineno)d - %(funcName)s: %(message)s',
-			level_styles={
-				'debug': {'color': 'cyan'},
-				'info': {'color': 'green'},
-				'warning': {'color': 'yellow'},
-				'error': {'color': 'red'},
-				'critical': {'color': 'red', 'bold': True},
-			},
-			field_styles={
-				'asctime': {'color': 'white'},
-				'levelname': {'color': 'white', 'bold': True},
-				'pathname': {'color': 'blue'},
-				'lineno': {'color': 'blue'},
-				'funcName': {'color': 'blue'},
-			},
-			isatty=True,
-			force_color=True,
-		)
-
-	def __init__(
-		self,
-		task_id,
-		llm_model=None,
-		enable_memory=True,
-		save_conversation_path='logs/playground/conversation',
-		use_vision=True,
-		cloud_sync=None,
-		use_thinking=False,
-		highlight_elements=False,
-		headless=True,
-	):
-		"""
-		Initialize the PlayGroundAgent with default or user-provided configurations.
-		"""
-
-		self._setup_logger()
-		self.logger.info('Initializing PlayGroundAgent...')
-
-		if llm_model is None:
-			llm_model = os.getenv('LLM_MODEL', 'gemini-2.5-flash')
-		self.logger.info('Using LLM model: %s', llm_model)
-
-		self.llm_model = llm_model
-		self.llm = get_llm_model(llm_model)
-		self.save_conversation_path = save_conversation_path
-		self.headless = headless
-		self.highlight_elements = highlight_elements
-		self.browser_session = None
-		self.agent = None
+		super().__init__(channel_name=channel_name, **kwargs)
 		self.task_id = task_id
-		self.enable_memory = enable_memory
-		self.save_conversation_path = save_conversation_path
-		self.use_vision = use_vision
-		self.sensitive_data = None
-		self.cloud_sync = cloud_sync
-		self.use_thinking = use_thinking
-		self.task_lists = []
-
-	def get_chrome_args(self):
-		"""
-		Get Chrome arguments optimized for automation.
-		"""
-		return CHROME_ARGS
-
-	def configure_browser(self):
-		"""
-		Configure the browser profile for the session.
-		"""
-		self.logger.info('Configuring browser profile...')
-		screen_size = get_display_size() or {'width': 1920, 'height': 1080}
-		browser_profile = BrowserProfile(
-			viewport=None,
-			keep_alive=True,
-			headless=self.headless,
-			disable_security=False,
-			highlight_elements=self.highlight_elements,
-			window_size=screen_size,
-			user_data_dir=f'/app/bugowl/browser_profiles/{uuid.uuid4()}',
-			args=self.get_chrome_args(),
-		)
-		self.browser_session = BrowserSession(browser_profile=browser_profile)
-		self.logger.info('Browser session configured.')
-
-	async def start_browser_session(self):
-		"""
-		Start the browser session.
-		"""
-		if not self.browser_session:
-			self.configure_browser()
-		await self.browser_session.start()  # type: ignore
-
-		self.logger.info('Browser session started.')
-
-		if self.browser_session:
-			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
-				self.browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
-				await self.browser_session._show_dvd_screensaver_loading_animation(self.browser_session.browser_context.pages[0])
-			else:
-				self.browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
-
-	async def stop_browser_session(self):
-		"""
-		Stop the browser session.
-		"""
-		if self.browser_session:
-			await self.browser_session.kill()
-			self.browser_session = None
-			self.logger.info('Browser session stopped.')
-
-	async def run_task(self, task, sensitive_data={}):
-		"""
-		Run a single task using the Agent.
-		"""
-		if not self.agent:
-			self.logger.info(f'Sensitive data: {sensitive_data}')
-			self.agent = Agent(
-				task=task,
-				task_id=self.task_id,
-				llm=self.llm,
-				browser_session=self.browser_session,
-				enable_memory=self.enable_memory,
-				save_conversation_path=self.save_conversation_path,
-				use_vision=self.use_vision,
-				sensitive_data=sensitive_data,
-				cloud_sync=self.cloud_sync,
-				use_thinking=self.use_thinking,
-				file_system_path=f'/app/bugowl/browser_data/playground/browser_user_agent{self.task_id}-{str(uuid.uuid4())}/',
-			)
-		else:
-			if len(sensitive_data) > 0:
-				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
-			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
-			self.agent.add_new_task(task)
-
-		history = await self.agent.run()
-		output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
-
-		return history, output
+		self.playground_task_list = []
+		self.channel_name = channel_name
+		self.logger.info('PlaygroundAgentManager initialized successfully.')
 
 	async def run_all_tasks(self):
 		"""
@@ -688,9 +569,13 @@ class PlayGroundAgent:
 			await self.start_browser_session()
 			self.logger.info('New Browser session is ready for task execution...')
 
+		if not (self.playground_task_list or self.task_id):
+			self.logger.warning('No tasks found in the playground.')
+			return
+
 		run_results = {}
 		try:
-			for task in self.task_lists:
+			for task in self.playground_task_list:
 				self.logger.info(f'Executing Task: {task}')
 				history, output = await self.run_task(task.title, sensitive_data=task.test_data)
 				self.logger.info(f'Task Result: {output}')
@@ -713,21 +598,226 @@ class PlayGroundAgent:
 		"""
 		tasks = []
 		for task_info in tasks_data:
-			task = Task(
+			task = PlayGroundTask(
 				uuid=task_info.get('uuid'),
 				title=task_info.get('title'),
 				data=task_info.get('data'),
 			)
 			tasks.append(task)
-		self.task_lists = tasks
+		self.playground_task_list = tasks
 		self.logger.info('Tasks loaded')
 
 	async def get_task(self, uuid):
 		"""
 		Get a task by its UUID.
 		"""
-		for task in self.task_lists:
+		if not self.playground_task_list:
+			self.logger.error('No tasks loaded in the playground.')
+			return None
+		for task in self.playground_task_list:
 			if task.uuid == uuid:
 				return task
 		self.logger.error(f'Task with UUID {uuid} not found.')
 		return None
+
+
+# class PlayGroundAgent:
+# 	def _setup_logger(self):
+# 		"""
+# 		Set up a custom logger for the AgentManager class with colored logs.
+# 		"""
+
+# 		self.logger = logging.getLogger('PlayGroundAgent')
+# 		self.logger.setLevel(logging.DEBUG)
+
+# 		self.logger.propagate = False
+
+# 		# Create a colored formatter
+# 		coloredlogs.install(
+# 			level='DEBUG',
+# 			logger=self.logger,
+# 			fmt='%(asctime)s [%(name)s] - [%(levelname)s] %(pathname)s:%(lineno)d - %(funcName)s: %(message)s',
+# 			level_styles={
+# 				'debug': {'color': 'cyan'},
+# 				'info': {'color': 'green'},
+# 				'warning': {'color': 'yellow'},
+# 				'error': {'color': 'red'},
+# 				'critical': {'color': 'red', 'bold': True},
+# 			},
+# 			field_styles={
+# 				'asctime': {'color': 'white'},
+# 				'levelname': {'color': 'white', 'bold': True},
+# 				'pathname': {'color': 'blue'},
+# 				'lineno': {'color': 'blue'},
+# 				'funcName': {'color': 'blue'},
+# 			},
+# 			isatty=True,
+# 			force_color=True,
+# 		)
+
+# 	def __init__(
+# 		self,
+# 		task_id,
+# 		llm_model=None,
+# 		enable_memory=True,
+# 		save_conversation_path='logs/playground/conversation',
+# 		use_vision=True,
+# 		cloud_sync=None,
+# 		use_thinking=False,
+# 		highlight_elements=False,
+# 		headless=True,
+# 	):
+# 		"""
+# 		Initialize the PlayGroundAgent with default or user-provided configurations.
+# 		"""
+
+# 		self._setup_logger()
+# 		self.logger.info('Initializing PlayGroundAgent...')
+
+# 		if llm_model is None:
+# 			llm_model = os.getenv('LLM_MODEL', 'gemini-2.5-flash')
+# 		self.logger.info('Using LLM model: %s', llm_model)
+
+# 		self.llm_model = llm_model
+# 		self.llm = get_llm_model(llm_model)
+# 		self.save_conversation_path = save_conversation_path
+# 		self.headless = headless
+# 		self.highlight_elements = highlight_elements
+# 		self.browser_session = None
+# 		self.agent = None
+# 		self.task_id = task_id
+# 		self.enable_memory = enable_memory
+# 		self.save_conversation_path = save_conversation_path
+# 		self.use_vision = use_vision
+# 		self.sensitive_data = None
+# 		self.cloud_sync = cloud_sync
+# 		self.use_thinking = use_thinking
+# 		self.task_lists = []
+
+# 	def get_chrome_args(self):
+# 		"""
+# 		Get Chrome arguments optimized for automation.
+# 		"""
+# 		return CHROME_ARGS
+
+# 	def configure_browser(self):
+# 		"""
+# 		Configure the browser profile for the session.
+# 		"""
+# 		self.logger.info('Configuring browser profile...')
+# 		screen_size = get_display_size() or {'width': 1920, 'height': 1080}
+# 		browser_profile = BrowserProfile(
+# 			viewport=None,
+# 			keep_alive=True,
+# 			headless=self.headless,
+# 			disable_security=False,
+# 			highlight_elements=self.highlight_elements,
+# 			window_size=screen_size,
+# 			user_data_dir=f'/app/bugowl/browser_profiles/{uuid.uuid4()}',
+# 			args=self.get_chrome_args(),
+# 		)
+# 		self.browser_session = BrowserSession(browser_profile=browser_profile)
+# 		self.logger.info('Browser session configured.')
+
+# 	async def start_browser_session(self):
+# 		"""
+# 		Start the browser session.
+# 		"""
+# 		if not self.browser_session:
+# 			self.configure_browser()
+# 		await self.browser_session.start()  # type: ignore
+
+# 		self.logger.info('Browser session started.')
+
+# 		if self.browser_session:
+# 			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
+# 				self.browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
+# 				await self.browser_session._show_dvd_screensaver_loading_animation(self.browser_session.browser_context.pages[0])
+# 			else:
+# 				self.browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
+
+# 	async def stop_browser_session(self):
+# 		"""
+# 		Stop the browser session.
+# 		"""
+# 		if self.browser_session:
+# 			await self.browser_session.kill()
+# 			self.browser_session = None
+# 			self.logger.info('Browser session stopped.')
+
+# 	async def run_task(self, task, sensitive_data={}):
+# 		"""
+# 		Run a single task using the Agent.
+# 		"""
+# 		if not self.agent:
+# 			self.logger.info(f'Sensitive data: {sensitive_data}')
+# 			self.agent = Agent(
+# 				task=task,
+# 				task_id=self.task_id,
+# 				llm=self.llm,
+# 				browser_session=self.browser_session,
+# 				enable_memory=self.enable_memory,
+# 				save_conversation_path=self.save_conversation_path,
+# 				use_vision=self.use_vision,
+# 				sensitive_data=sensitive_data,
+# 				cloud_sync=self.cloud_sync,
+# 				use_thinking=self.use_thinking,
+# 				file_system_path=f'/app/bugowl/browser_data/playground/browser_user_agent{self.task_id}-{str(uuid.uuid4())}/',
+# 			)
+# 		else:
+# 			if len(sensitive_data) > 0:
+# 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
+# 			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
+# 			self.agent.add_new_task(task)
+
+# 		history = await self.agent.run()
+# 		output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
+
+# 		return history, output
+
+# 	async def run_all_tasks(self):
+# 		"""
+# 		Run all tasks in the playground.
+# 		"""
+# 		if not self.browser_session:
+# 			await self.start_browser_session()
+# 			self.logger.info('New Browser session is ready for task execution...')
+# 		else:
+# 			await self.stop_browser_session()
+# 			self.logger.info('Browser session stopped. Starting new browser session for task execution...')
+# 			await self.start_browser_session()
+# 			self.logger.info('New Browser session is ready for task execution...')
+
+# 		run_results = {}
+# 		try:
+# 			for task in self.task_lists:
+# 				self.logger.info(f'Executing Task: {task}')
+# 				history, output = await self.run_task(task.title, sensitive_data=task.test_data)
+# 				self.logger.info(f'Task Result: {output}')
+# 				run_results[task] = output
+
+# 				if not history.is_successful():
+# 					self.logger.error(f'Task {task} failed.')
+# 					return run_results, f'{task} - FAILED'
+
+# 			self.logger.info('All tasks executed successfully.')
+# 			return run_results, 'All tasks - SUCCESSFUL'
+
+# 		except Exception as e:
+# 			self.logger.error(f'Error running tasks: {e}', exc_info=True)
+# 			raise
+
+# 	async def load_tasks(self, tasks_data):
+# 		"""
+# 		Load tasks with the given data.
+# 		"""
+# 		tasks = []
+# 		for task_info in tasks_data:
+# 			task = PlayGroundTask(
+# 				uuid=task_info.get('uuid'),
+# 				title=task_info.get('title'),
+# 				data=task_info.get('data'),
+# 			)
+# 			tasks.append(task)
+# 		self.task_lists = tasks
+# 		self.logger.info('Tasks loaded')

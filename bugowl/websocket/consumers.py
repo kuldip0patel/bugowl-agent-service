@@ -2,7 +2,7 @@ import json
 import logging
 import uuid
 
-from bugowl_agent.agent import PlayGroundAgent
+from bugowl_agent.agent import PlayGroundAgentManager
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
@@ -122,7 +122,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				self.scope['user_business'] = user.get('business')
 
 				await self.accept()
-				self.playground_agent = PlayGroundAgent(task_id=str(uuid.uuid4()))
+				self.playground_agent = PlayGroundAgentManager(task_id=str(uuid.uuid4()), channel_name=self.channel_name)
 				await self.playground_agent.start_browser_session()
 				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 				await self.send(
