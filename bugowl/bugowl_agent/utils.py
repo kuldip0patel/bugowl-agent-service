@@ -112,6 +112,28 @@ anthropic_models = [
 ]
 
 
+CHROME_ARGS = [
+	'--disable-password-manager-reauthentication',
+	'--disable-features=PasswordManager,AutofillServerCommunication',
+	'--disable-save-password-bubble',
+	'--disable-notifications',
+	'--disable-infobars',
+	'--disable-translate',
+	'--disable-popup-blocking',
+	'--disable-default-apps',
+	'--disable-extensions-http-throttling',
+	'--disable-geolocation',
+	'--disable-media-stream',
+	'--use-fake-ui-for-media-stream',
+	'--use-fake-device-for-media-stream',
+	'--no-first-run',
+	'--no-default-browser-check',
+	'--disable-backgrounding-occluded-windows',
+	'--disable-renderer-backgrounding',
+	'--disable-background-timer-throttling',
+]
+
+
 def get_llm_model(model_name: str):
 	"""
 	Returns the appropriate LLM model based on the provided model name.

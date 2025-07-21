@@ -4,6 +4,7 @@ const LiveStream = () => {
   const [token, setToken] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [frame, setFrame] = useState(null);
+  const [currentUrl, setCurrentUrl] = useState(''); // Add state for current URL
   const websocket = useRef(null);
 
   const handleConnect = () => {
@@ -19,8 +20,13 @@ const LiveStream = () => {
 
       websocket.current.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === 'browser_frame' && data.frame) {
-          setFrame(`data:image/jpeg;base64,${data.frame}`);
+       if (data.type === 'browser_frame') {
+          if (data.frame) {
+            setFrame(`data:image/jpeg;base64,${data.frame}`);
+          }
+          if (data.current_url) {
+            setCurrentUrl(data.current_url); // Update current URL
+          }
         }
       };
 
@@ -28,12 +34,14 @@ const LiveStream = () => {
         console.log('WebSocket disconnected');
         setIsConnected(false);
         setFrame(null);
+        setCurrentUrl(''); // Reset current URL
       };
 
       websocket.current.onerror = (error) => {
         console.error('WebSocket error:', error);
         setIsConnected(false);
         setFrame(null);
+        setCurrentUrl(''); // Reset current URL
       };
     }
   };
@@ -71,10 +79,28 @@ const LiveStream = () => {
           <button onClick={handleDisconnect}>Disconnect</button>
         )}
       </div>
+
+      {/* Display the current URL above the stream window */}
+      {isConnected && currentUrl && (
+        <div style={{
+          marginTop: '20px',
+          marginBottom: '10px',
+          padding: '8px',
+          backgroundColor: '#f0f0f0',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          color: '#333',
+          fontFamily: 'monospace',
+          wordBreak: 'break-all'
+        }}>
+          <strong>URL: </strong> {currentUrl}
+        </div>
+      )}
+
       <div style={{
         border: '1px solid #ccc',
         boxShadow: '0 4px 8px 0 rgba(0,0,0,0.2)',
-        marginTop: '20px',
+        // Removed marginTop to bring it closer to the URL display
         marginLeft: '20px',
         marginBottom: '20px',
         maxWidth: '80%',

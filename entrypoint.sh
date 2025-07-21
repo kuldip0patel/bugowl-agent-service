@@ -85,6 +85,16 @@ echo "PYTHON_BIN=$PYTHON_BIN"
 echo "Checking if Django is available:"
 $PYTHON_BIN -c "import django; print(f'Django version: {django.get_version()}')" || echo "Django not available"
 
+
+# Run browser verification script
+if [ -f "/app/verify-browsers.sh" ]; then
+    echo "Running browser verification script..."
+    bash /app/verify-browsers.sh || {
+        echo "WARNING: Browser verification failed, but continuing..."
+        echo "Browser tasks may fail until browsers are properly installed"
+    }
+fi
+
 echo "Checking Playwright browser installation:"
 echo "PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-not set}"
 if [ -d "${PLAYWRIGHT_BROWSERS_PATH:-/root/.cache/ms-playwright}" ]; then
