@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import os
 
+import redis.asyncio as redis
 from channels.layers import get_channel_layer
 from dotenv import load_dotenv
 from playwright._impl._errors import TargetClosedError
@@ -21,6 +23,7 @@ class LiveStreaming:
 		self.job_instance = agent_manager.job_instance
 		self.testtask_run = agent_manager.testtask_run
 		self.test_case_run = agent_manager.test_case_run
+		self.redis = None
 
 		self.channel_layer = get_channel_layer()  # Get the channel layer for WebSocket communication
 		if self.logger:
@@ -36,6 +39,7 @@ class LiveStreaming:
 			screenshot = await page.screenshot()
 			frame_b64 = base64.b64encode(screenshot).decode('utf-8')
 			current_url = page.url if page else None
+			self.logger.info(f'Captured frame for URL: {current_url}')
 			return frame_b64, current_url
 		except TargetClosedError:
 			if self.logger:
@@ -54,24 +58,30 @@ class LiveStreaming:
 			self.logger.info('Started streaming frames by capturing in a loop.')
 
 		group_name = f'BrowserStreaming_Business_{self.business_id}'
+		group_key = f'asgi:group:{group_name}'
+		try:
+			while self.recording:
+				# Check the key type to prevent WRONGTYPE errors
+				key_type = await self.redis.type(group_key)  # type:ignore
+				if key_type.decode('utf-8') not in ['set', 'zset', 'none']:
+					self.logger.warning(f"Deleting key '{group_key}' with wrong type '{key_type.decode('utf-8')}'.")
+					await self.redis.delete(group_key)  # type:ignore
 
-		while self.recording:
-			# Check if the group has any active connections; if not, skip this iteration
-			if self.channel_layer:
-				group_channel_count = await self.channel_layer.group_channels(group_name)
-				if not group_channel_count:
+				# Use SCARD to efficiently check the number of active connections
+				active_connection_count = (
+					await self.redis.scard(group_key) if key_type.decode('utf-8') == 'set' else await self.redis.zcard(group_key)  # type:ignore
+				)  # type:ignore
+				if active_connection_count == 0:
+					# self.logger.warning(f'No active connections in group {group_name}. Pausing frame capture.')
+					await asyncio.sleep(1)  # Sleep for a second if no one is watching
+					continue
+
+				if self.paused:
 					await asyncio.sleep(0.1)
 					continue
 
-			if self.paused:
-				await asyncio.sleep(0.1)
-				continue
-
-			try:
 				start_time = asyncio.get_event_loop().time()
-
 				frame_b64, current_url = await self._capture_frame()
-
 				if frame_b64 and self.channel_layer:
 					await self.channel_layer.group_send(
 						group_name,
@@ -87,18 +97,17 @@ class LiveStreaming:
 							'case_status': (self.test_case_run.status if self.test_case_run else None),
 						},
 					)
-
 				# Adjust sleep time to maintain the target FPS
 				elapsed_time = asyncio.get_event_loop().time() - start_time
 				sleep_duration = (1 / self.fps) - elapsed_time
 				if sleep_duration > 0:
 					await asyncio.sleep(sleep_duration)
-
-			except Exception as e:
-				if self.logger:
-					self.logger.error(f'Error during frame streaming loop: {e}', exc_info=True)
-				# Stop streaming on error
-				break
+		except Exception as e:
+			if self.logger:
+				self.logger.error(f'Error during frame streaming loop: {e}', exc_info=True)
+		finally:
+			if self.redis:
+				await self.redis.close()
 
 	async def start(self):
 		"""
@@ -107,6 +116,15 @@ class LiveStreaming:
 		if self.recording:
 			if self.logger:
 				self.logger.warning('Streaming already in progress.')
+			return
+		try:
+			if self.redis is None:
+				# Initialize Redis connection if not already done
+				redis_url = os.getenv('DJANGO_CACHE_LOCATION', 'redis://redis-agent:6381/1')
+				self.redis = redis.from_url(redis_url)
+		except Exception as e:
+			if self.logger:
+				self.logger.error(f'Failed to connect to Redis: {e}', exc_info=True)
 			return
 		self.recording = True
 		self.paused = False
@@ -135,5 +153,9 @@ class LiveStreaming:
 		Stop streaming.
 		"""
 		self.recording = False
+		if self.redis:
+			await self.redis.close()
+			self.redis = None
+			self.logger.info('Redis connection for streaming closed.')
 		if self.logger:
 			self.logger.info('Stopping frame streaming.')

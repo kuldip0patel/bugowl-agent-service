@@ -69,6 +69,7 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 		case_status = event.get('case_status', None)
 		task_uuid = event.get('task_uuid', None)
 		task_status = event.get('task_status', None)
+		current_url = event.get('current_url', None)
 		if not frame_data:
 			logger.warning('No frame to send')
 			return
@@ -85,6 +86,7 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 						'frame': frame_data,
 						'job_uuid': job_uuid,
 						'job_status': job_status,
+						'current_url': current_url,
 						'case_uuid': case_uuid,
 						'case_status': case_status,
 						'task_uuid': task_uuid,
