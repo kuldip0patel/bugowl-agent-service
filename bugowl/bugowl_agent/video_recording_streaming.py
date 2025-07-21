@@ -45,7 +45,7 @@ class LiveStreaming:
 			screenshot = await page.screenshot()
 			frame_b64 = base64.b64encode(screenshot).decode('utf-8')
 			current_url = page.url if page else None
-			self.logger.info(f'Captured frame for URL: {current_url}')
+			# self.logger.info(f'Captured frame for URL: {current_url}')
 			return frame_b64, current_url
 		except TargetClosedError:
 			if self.logger:
@@ -92,35 +92,33 @@ class LiveStreaming:
 				start_time = asyncio.get_event_loop().time()
 				frame_b64, current_url = await self._capture_frame()
 				if frame_b64 and self.channel_layer:
-					payload = (
-						{
-							'type': 'send_frame',
-							'frame': frame_b64,
-							'current_url': current_url,
-							'job_uuid': (
-								str(self.job_instance.job_uuid) if hasattr(self, 'job_instance') and self.job_instance else None
-							),
-							'job_status': (
-								self.job_instance.status if hasattr(self, 'job_instance') and self.job_instance else None
-							),
-							'task_uuid': (
-								str(self.testtask_run.test_task_uuid)
-								if hasattr(self, 'testtask_run') and self.testtask_run
-								else None
-							),
-							'task_status': (
-								self.testtask_run.status if hasattr(self, 'testtask_run') and self.testtask_run else None
-							),
-							'case_uuid': (
-								str(self.test_case_run.test_case_uuid)
-								if hasattr(self, 'test_case_run') and self.test_case_run
-								else None
-							),
-							'case_status': (
-								self.test_case_run.status if hasattr(self, 'test_case_run') and self.test_case_run else None
-							),
-						},
-					)
+					payload = {
+						'type': 'send_frame',
+						'frame': frame_b64,
+						'current_url': current_url,
+						'job_uuid': (
+							str(self.job_instance.job_uuid) if hasattr(self, 'job_instance') and self.job_instance else None
+						),
+						'job_status': (
+							self.job_instance.status if hasattr(self, 'job_instance') and self.job_instance else None
+						),
+						'task_uuid': (
+							str(self.testtask_run.test_task_uuid)
+							if hasattr(self, 'testtask_run') and self.testtask_run
+							else None
+						),
+						'task_status': (
+							self.testtask_run.status if hasattr(self, 'testtask_run') and self.testtask_run else None
+						),
+						'case_uuid': (
+							str(self.test_case_run.test_case_uuid)
+							if hasattr(self, 'test_case_run') and self.test_case_run
+							else None
+						),
+						'case_status': (
+							self.test_case_run.status if hasattr(self, 'test_case_run') and self.test_case_run else None
+						),
+					}
 					if group_name:
 						await self.channel_layer.group_send(
 							group_name,
@@ -152,7 +150,7 @@ class LiveStreaming:
 				self.logger.warning('Streaming already in progress.')
 			return
 		try:
-			if (self.redis is None) and (self.group_name):
+			if (hasattr(self,'redis') and self.redis is None) and (hasattr(self,'group_name') and self.group_name):
 				# Initialize Redis connection if not already done
 				redis_url = os.getenv('DJANGO_CACHE_LOCATION', 'redis://redis-agent:6381/1')
 				self.redis = redis.from_url(redis_url)
@@ -187,7 +185,7 @@ class LiveStreaming:
 		Stop streaming.
 		"""
 		self.recording = False
-		if self.redis:
+		if hasattr(self, 'redis') and self.redis:
 			await self.redis.close()
 			self.redis = None
 			self.logger.info('Redis connection for streaming closed.')

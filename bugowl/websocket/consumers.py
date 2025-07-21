@@ -122,7 +122,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				self.scope['user_business'] = user.get('business')
 
 				await self.accept()
-				self.playground_agent = PlayGroundAgentManager(task_id=str(uuid.uuid4()), channel_name=self.channel_name)
+				self.playground_agent = PlayGroundAgentManager(task_id=str(uuid.uuid4()), channel_name=self.channel_name, save_conversation_path="logs/playground/conversation",record_video_dir=None)
 				await self.playground_agent.start_browser_session()
 				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 				await self.send(
@@ -160,6 +160,8 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		try:
 			data = json.loads(text_data)
 
+			logger.info(f'Received data: {data}')
+
 			await COMMAND_HANDLER(self, data)
 
 		except Exception as e:
@@ -167,3 +169,35 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 			await self.send(
 				text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
 			)
+
+	async def send_frame(self, event):
+		frame_data = event.get('frame', None)
+		job_uuid = event.get('job_uuid', None)
+		job_status = event.get('job_status', None)
+		case_uuid = event.get('case_uuid', None)
+		case_status = event.get('case_status', None)
+		task_uuid = event.get('task_uuid', None)
+		task_status = event.get('task_status', None)
+		current_url = event.get('current_url', None)
+		if not frame_data:
+			logger.warning('No frame to send')
+			return
+
+		try:
+			await self.send(
+				text_data=json.dumps(
+					{
+						'type': 'browser_frame',
+						'frame': frame_data,
+						'job_uuid': job_uuid,
+						'job_status': job_status,
+						'current_url': current_url,
+						'case_uuid': case_uuid,
+						'case_status': case_status,
+						'task_uuid': task_uuid,
+						'task_status': task_status,
+					}
+				)
+			)
+		except Exception as e:
+			logger.error(f'Error sending frame: {e}', exc_info=True)

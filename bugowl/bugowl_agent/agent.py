@@ -408,7 +408,7 @@ class AgentManager:
 								else {}
 							)
 							self.check_job_cancelled('run_test_case_taskLoop')
-							self.task_id = str(self.test_case_run.test_case_uuid)  # type: ignore
+							self.task_id = str(self.test_case_run.test_case_uuid) #type:ignore
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore
@@ -473,7 +473,7 @@ class AgentManager:
 			self.logger.info(f'Sensitive data: {sensitive_data}')
 			self.check_job_cancelled('run_task')
 			self.agent = Agent(
-				task=self.testtask_run.title,  # type: ignore
+				task=task,  # type: ignore
 				task_id=self.task_id,
 				llm=self.llm,
 				browser_session=self.browser_session,

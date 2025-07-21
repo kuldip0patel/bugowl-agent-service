@@ -13,7 +13,7 @@ async def LOAD_TASK(self, data):
 	Load a task based on the provided data.
 	"""
 	try:
-		await self.playground_agent.load_task(data)
+		await self.playground_agent.load_tasks(data)
 		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'Task loaded successfully'}))
 	except Exception as e:
 		raise
@@ -24,8 +24,8 @@ async def EXECUTE_ALL_TASKS(self, data):
 	Execute all tasks in the current session.
 	"""
 	try:
-		await self.playground_agent.load_task(data)
-		await self.playground_agent.execute_all_tasks()
+		await self.playground_agent.load_tasks(data)
+		await self.playground_agent.run_all_tasks()
 		await self.send(
 			text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'All tasks executed successfully'})
 		)
@@ -38,8 +38,10 @@ async def EXECUTE_TASK(self, data, uuid):
 	Execute a specific task based on the provided data.
 	"""
 	try:
-		await self.playground_agent.load_task(data)
-		await self.playground_agent.execute_task(uuid)
+		await self.playground_agent.load_tasks(data)
+		task = await self.playground_agent.get_task(uuid)
+
+		await self.playground_agent.run_task(task.title, {})
 		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'Task executed successfully'}))
 	except Exception as e:
 		raise
@@ -51,7 +53,7 @@ async def COMMAND_HANDLER(self, data):
 		data (dict): The data received from the WebSocket.
 	"""
 	try:
-		if not data.get('COMMANDS'):
+		if not data.get('COMMAND'):
 			logger.warning('No COMMANDS found in received data')
 			await self.send(
 				text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No COMMANDS found in received data'})
