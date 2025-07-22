@@ -11,6 +11,7 @@ from job.helpers import get_cancel_job_status_cache
 from job.utils import get_cancel_cache_key
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
+from websocket.utils import get_job_streaming_group_name
 
 from browser_use import Agent
 from browser_use.browser import BrowserProfile
@@ -282,7 +283,7 @@ class AgentManager:
 
 		# Initialize and start LiveStreaming
 		if not self.channel_name:
-			self.group_name = f'BrowserStreaming_Business_{self.job_instance.business}'  # type: ignore
+			self.group_name = get_job_streaming_group_name(self.job_instance.job_uuid)  # type: ignore
 
 		self.live_streaming = LiveStreaming(
 			agent_manager=self, channel_name=self.channel_name, group_name=self.group_name, fps=12

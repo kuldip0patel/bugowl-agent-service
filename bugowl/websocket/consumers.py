@@ -7,7 +7,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 from .helpers import COMMAND_HANDLER
-from .utils import PLAYCOMMANDS
+from .utils import PLAYCOMMANDS, get_job_streaming_group_name
 
 logger = logging.getLogger(settings.ENV)
 
@@ -33,11 +33,7 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 			self.scope['user_last_name'] = user.get('last_name')
 			self.scope['user_business'] = user.get('business')
 
-			self.group_name = f'BrowserStreaming_Business_{self.scope["user_business"]}'
-
-			await self.channel_layer.group_add(  # type: ignore
-				self.group_name, self.channel_name
-			)
+			self.group_name = None
 			await self.accept()
 			logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 
@@ -59,7 +55,28 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 		data = json.loads(text_data)
 		logger.info(f'Received data: {data}')
 
-		await self.send(text_data=json.dumps(data))
+		if data.get('COMMAND') != PLAYCOMMANDS.C2S_CONNECT.value:
+			logger.error(f'Invalid command received: {data.get("COMMAND")}')
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Invalid command'}))
+			return
+		if not data.get('JOB_UUID'):
+			logger.error('Job UUID is required')
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Job UUID is required'}))
+			return
+
+		if data.get('COMMAND') == PLAYCOMMANDS.C2S_CONNECT.value:
+			self.job_uuid = data.get('JOB_UUID')
+			group_name = get_job_streaming_group_name(self.job_uuid)
+
+			if self.group_name != group_name:
+				if self.group_name:
+					await self.channel_layer.group_discard(self.group_name, self.channel_name)  # type: ignore
+				self.group_name = group_name
+				await self.channel_layer.group_add(self.group_name, self.channel_name)  # type: ignore
+			else:
+				logger.info(f'Already connected to group {self.group_name}, skipping group add')
+
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_CONNECT.value, 'job_uuid': self.job_uuid}))
 
 	async def send_frame(self, event):
 		frame_data = event.get('frame', None)
