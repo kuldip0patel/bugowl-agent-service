@@ -122,7 +122,12 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				self.scope['user_business'] = user.get('business')
 
 				await self.accept()
-				self.playground_agent = PlayGroundAgentManager(task_id=str(uuid.uuid4()), channel_name=self.channel_name, save_conversation_path="logs/playground/conversation",record_video_dir=None)
+				self.playground_agent = PlayGroundAgentManager(
+					task_id=str(uuid.uuid4()),
+					channel_name=self.channel_name,
+					save_conversation_path='logs/playground/conversation',
+					record_video_dir=None,
+				)
 				await self.playground_agent.start_browser_session()
 				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 				await self.send(
@@ -147,6 +152,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 	async def disconnect(self, close_code):
 		try:
 			if hasattr(self, 'playground_agent'):
+				self.playground_agent.agent.stop()  # type:ignore
 				await self.playground_agent.stop_browser_session()
 				logger.info('Browser session stopped successfully.')
 			else:

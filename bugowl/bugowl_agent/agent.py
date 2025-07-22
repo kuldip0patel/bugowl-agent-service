@@ -28,7 +28,7 @@ class PlayGroundTask:
 	A simple task class to encapsulate task-related data.
 	"""
 
-	def __init__(self, uuid, title, data=None):
+	def __init__(self, uuid, title, data={}):
 		self.uuid = uuid
 		self.title = title
 		self.test_data = data
@@ -408,7 +408,7 @@ class AgentManager:
 								else {}
 							)
 							self.check_job_cancelled('run_test_case_taskLoop')
-							self.task_id = str(self.test_case_run.test_case_uuid) #type:ignore
+							self.task_id = str(self.test_case_run.test_case_uuid)  # type:ignore
 							history, output = await self.run_task(title, sensitive_data=sensitive_data)
 							self.logger.info(f'Task #{count} Result: {output}')
 							run_results_task[str(self.testtask_run.uuid)] = output  # type: ignore

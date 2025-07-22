@@ -3,6 +3,7 @@ import base64
 import os
 
 import redis.asyncio as redis
+from channels.exceptions import ChannelFull
 from channels.layers import get_channel_layer
 from dotenv import load_dotenv
 from playwright._impl._errors import TargetClosedError
@@ -131,6 +132,9 @@ class LiveStreaming:
 				sleep_duration = (1 / self.fps) - elapsed_time
 				if sleep_duration > 0:
 					await asyncio.sleep(sleep_duration)
+		except ChannelFull:
+			if self.logger:
+				self.logger.warning(f'Channel {self.channel_name} is full, skipping frame.')
 		except Exception as e:
 			if self.logger:
 				self.logger.error(f'Error during frame streaming loop: {e}', exc_info=True)
