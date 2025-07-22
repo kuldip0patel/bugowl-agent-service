@@ -601,7 +601,7 @@ class PlayGroundAgentManager(AgentManager):
 			task = PlayGroundTask(
 				uuid=task_info.get('uuid'),
 				title=task_info.get('title'),
-				data=task_info.get('data'),
+				# data=task_info.get('data'),
 			)
 			tasks.append(task)
 		self.playground_task_list = tasks
