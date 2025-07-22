@@ -4,15 +4,14 @@ import os
 from api.utils import HttpMethod, HttpUtils
 from celery import shared_task
 from django.conf import settings
-from django.db.utils import OperationalError
 from job.helpers import generate_agent_JWT_token
 
 logger = logging.getLogger(settings.ENV)
 
 
-# @shared_task()
-@shared_task(bind=True, autoretry_for=(OperationalError,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+@shared_task()
 def update_status_main(
+	self,
 	job_uuid=None,
 	job_status=None,
 	test_case_uuid=None,

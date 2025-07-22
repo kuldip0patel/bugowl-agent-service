@@ -4,7 +4,6 @@ from bugowl_agent.agent import AgentManager
 from bugowl_agent.exceptions import JobCancelledException
 from celery import shared_task
 from django.conf import settings
-from django.db.utils import OperationalError
 
 from bugowl.api.utils import JobStatusEnum
 from job.models import Job
@@ -14,9 +13,8 @@ from .helpers import get_cancel_job_status_cache
 logger = logging.getLogger(settings.ENV)
 
 
-# @shared_task()
-@shared_task(bind=True, autoretry_for=(OperationalError,), retry_kwargs={'max_retries': 3, 'countdown': 60})
-def execute_job(job_id):
+@shared_task()
+def execute_job(self, job_id):
 	"""
 	Execute a job
 
