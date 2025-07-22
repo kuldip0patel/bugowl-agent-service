@@ -11,7 +11,6 @@ logger = logging.getLogger(settings.ENV)
 
 @shared_task()
 def update_status_main(
-	self,
 	job_uuid=None,
 	job_status=None,
 	test_case_uuid=None,

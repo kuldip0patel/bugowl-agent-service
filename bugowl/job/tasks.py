@@ -14,7 +14,7 @@ logger = logging.getLogger(settings.ENV)
 
 
 @shared_task()
-def execute_job(self, job_id):
+def execute_job(job_id):
 	"""
 	Execute a job
 
