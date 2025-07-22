@@ -64,7 +64,7 @@ class LiveStreaming:
 		if self.logger:
 			self.logger.info('Started streaming frames by capturing in a loop.')
 
-		group_name = self.group_name  # f'BrowserStreaming_Business_{self.business_id}'
+		group_name = self.group_name
 		group_key = f'asgi:group:{group_name}'
 		try:
 			while self.recording:
