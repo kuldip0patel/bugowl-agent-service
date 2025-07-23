@@ -473,7 +473,8 @@ class AgentManager:
 		if not self.agent:
 			self.logger.info(f'Sensitive data: {sensitive_data}')
 			self.check_job_cancelled('run_task')
-			self.agent = Agent(
+			self.agent = await asyncio.to_thread(
+				Agent,
 				task=task,  # type: ignore
 				task_id=self.task_id,
 				llm=self.llm,
@@ -491,7 +492,7 @@ class AgentManager:
 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
 			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
 			self.check_job_cancelled('run_task')
-			self.agent.add_new_task(task)
+			await asyncio.to_thread(self.agent.add_new_task, task)
 
 		history = await self.agent.run()
 		output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
@@ -554,7 +555,11 @@ class PlayGroundAgentManager(AgentManager):
 		super().__init__(channel_name=channel_name, **kwargs)
 		self.task_id = task_id
 		self.playground_task_list = []
+		self.playground_task_to_execute = []
 		self.channel_name = channel_name
+		self.stream_key = None
+		self.paused = False
+		self.execution = False
 		self.logger.info('PlaygroundAgentManager initialized successfully.')
 
 	async def run_all_tasks(self):
@@ -593,6 +598,34 @@ class PlayGroundAgentManager(AgentManager):
 			self.logger.error(f'Error running tasks: {e}', exc_info=True)
 			raise
 
+	def execute_tasks(self):
+		"""
+		Execute the tasks that have been added to the execution list.
+		"""
+		if not self.playground_task_to_execute:
+			self.logger.warning('No tasks to execute in the playground.')
+			return
+
+		self.logger.info('Executing tasks...')
+		run_results = {}
+		try:
+			for task in self.playground_task_to_execute:
+				self.logger.info(f'Executing Task: {task}')
+				history, output = asyncio.run(self.run_task(task.title, sensitive_data=task.test_data))
+				self.logger.info(f'Task Result: {output}')
+				run_results[task] = output
+
+				if not history.is_successful():
+					self.logger.error(f'Task {task} failed.')
+					return run_results, f'{task} - FAILED'
+
+			self.logger.info('All tasks executed successfully.')
+			return run_results, 'All tasks - SUCCESSFUL'
+
+		except Exception as e:
+			self.logger.error(f'Error executing tasks: {e}', exc_info=True)
+			raise
+
 	async def load_tasks(self, tasks_data):
 		"""
 		Load tasks with the given data.
@@ -620,6 +653,65 @@ class PlayGroundAgentManager(AgentManager):
 				return task
 		self.logger.error(f'Task with UUID {uuid} not found.')
 		return None
+
+	async def add_task_to_execute(self, task_uuid_list):
+		"""
+		Add a task to the list of tasks to execute.
+		"""
+		for task_uuid in task_uuid_list:
+			if task_uuid is None:
+				self.logger.error('Task UUID is None. Cannot add to execution list.')
+				return False
+			task = await self.get_task(task_uuid)
+			if not task:
+				self.logger.error(f'Task with UUID {task_uuid} not found.')
+				return False
+			self.playground_task_to_execute.append(task)
+			self.logger.info(f'Task {task.title} added to execution list.')
+
+	async def pause_execution(self):
+		"""
+		Pause the execution of tasks.
+		"""
+		if self.paused and self.execution:
+			self.logger.warning('Execution is already paused.')
+			return False
+		elif not self.execution:
+			self.logger.error('Execution has not started yet. Cannot pause.')
+			self.paused = False
+			return False
+		self.paused = True
+		self.logger.info('Execution paused.')
+		return True
+
+	async def resume_execution(self):
+		"""
+		Resume the execution of tasks.
+		"""
+		if not self.paused and self.execution:
+			self.logger.warning('Execution is not paused. Cannot resume.')
+			return False
+		elif not self.execution:
+			self.logger.error('Execution has not started yet. Cannot resume.')
+			self.paused = False
+			return False
+		self.paused = False
+		self.logger.info('Execution resumed.')
+		return True
+
+	async def stop_execution(self):
+		"""
+		Stop the execution of tasks.
+		"""
+		if not self.execution:
+			self.logger.error('Execution has not started yet. Cannot stop.')
+			return False
+		self.execution = False
+		self.paused = False
+		self.playground_task_to_execute = []
+		self.playground_task_list = []
+		self.logger.info('Execution stopped.')
+		return True
 
 
 # class PlayGroundAgent:

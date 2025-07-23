@@ -1,7 +1,10 @@
+import asyncio
 import json
 import logging
+import os
 import uuid
 
+import redis.asyncio as aioredis
 from bugowl_agent.agent import PlayGroundAgentManager
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
@@ -129,7 +132,6 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 
 			if error:
 				logger.warning('WebSocket connection failed: %s', error)
-				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': error}))
 				await self.close(code=403, reason=error)
 			elif user:
 				self.scope['user_id'] = user.get('user_id')
@@ -146,6 +148,8 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					record_video_dir=None,
 				)
 				await self.playground_agent.start_browser_session()
+				self.agent_task_id = str(uuid.uuid4())
+				self.redis = aioredis.from_url(os.getenv('DJANGO_CACHE_LOCATION', ''), decode_responses=True)
 				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 				await self.send(
 					text_data=json.dumps(
@@ -158,11 +162,6 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				logger.error('WebSocket connection failed: Authorization header missing')
 				await self.close(code=401, reason='Authorization header missing')
 		except Exception as e:
-			await self.send(
-				text_data=json.dumps(
-					{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': f'Error during WebSocket connection: {e}'}
-				)
-			)
 			logger.error(f'Error during WebSocket connection: {e}', exc_info=True)
 			await self.close(code=500, reason='Internal Server Error')
 
@@ -185,7 +184,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 
 			logger.info(f'Received data: {data}')
 
-			await COMMAND_HANDLER(self, data)
+			asyncio.create_task(COMMAND_HANDLER(self, data))
 
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
