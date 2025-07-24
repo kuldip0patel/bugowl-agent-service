@@ -115,7 +115,7 @@ const Playground = () => {
       return;
     }
     
-    sendCommand('LOAD_TASK', {
+    sendCommand('C2S_LOAD_TASK', {
       ALL_TASK_DATA: tasks.map(task => ({
         uuid: task.uuid,
         title: task.title,
@@ -129,8 +129,8 @@ const Playground = () => {
       alert('Please add at least one task');
       return;
     }
-    
-    sendCommand('EXECUTE_ALL_TASKS', {
+
+    sendCommand('C2S_EXECUTE_ALL_TASKS', {
       ALL_TASK_DATA: tasks.map(task => ({
         uuid: task.uuid,
         title: task.title,
@@ -144,8 +144,8 @@ const Playground = () => {
       alert('Please select a task to execute');
       return;
     }
-    
-    sendCommand('EXECUTE_TASK', {
+
+    sendCommand('C2S_EXECUTE_TASK', {
       TASK_UUID: selectedTaskUuid,
       ALL_TASK_DATA: tasks.map(task => ({
         uuid: task.uuid,
@@ -239,12 +239,12 @@ const Playground = () => {
 
       <div className="control-panel">
         <div className="command-buttons">
-          <button onClick={handleLoadTasks} disabled={!isConnected}>LOAD_TASK</button>
-          <button onClick={handleExecuteAllTasks} disabled={!isConnected}>EXECUTE_ALL_TASKS</button>
-          <button onClick={handleExecuteTask} disabled={!isConnected || !selectedTaskUuid}>EXECUTE_TASK</button>
-          <button onClick={() => sendCommand('STOP')} disabled={!isConnected}>STOP</button>
-          <button onClick={() => sendCommand('PAUSE')} disabled={!isConnected}>PAUSE</button>
-          <button onClick={() => sendCommand('RESUME')} disabled={!isConnected}>RESUME</button>
+          <button onClick={handleLoadTasks} disabled={!isConnected}>C2S_LOAD_TASK</button>
+          <button onClick={handleExecuteAllTasks} disabled={!isConnected}>C2S_EXECUTE_ALL_TASKS</button>
+          <button onClick={handleExecuteTask} disabled={!isConnected || !selectedTaskUuid}>C2S_EXECUTE_TASK</button>
+          <button onClick={() => sendCommand('C2S_STOP')} disabled={!isConnected}>C2S_STOP</button>
+          <button onClick={() => sendCommand('C2S_PAUSE')} disabled={!isConnected}>C2S_PAUSE</button>
+          <button onClick={() => sendCommand('C2S_RESUME')} disabled={!isConnected}>C2S_RESUME</button>
         </div>
       </div>
 
