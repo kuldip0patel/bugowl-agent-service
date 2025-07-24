@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -57,11 +58,11 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 
 		if data.get('COMMAND') != PLAYCOMMANDS.C2S_CONNECT.value:
 			logger.error(f'Invalid command received: {data.get("COMMAND")}')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Invalid command'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Invalid command'}))
 			return
 		if not data.get('JOB_UUID'):
 			logger.error('Job UUID is required')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Job UUID is required'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Job UUID is required'}))
 			return
 
 		if data.get('COMMAND') == PLAYCOMMANDS.C2S_CONNECT.value:
@@ -76,7 +77,7 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 			else:
 				logger.info(f'Already connected to group {self.group_name}, skipping group add')
 
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_CONNECT.value, 'job_uuid': self.job_uuid}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_CONNECT.value, 'job_uuid': self.job_uuid}))
 
 	async def send_frame(self, event):
 		frame_data = event.get('frame', None)
@@ -129,7 +130,6 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 
 			if error:
 				logger.warning('WebSocket connection failed: %s', error)
-				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': error}))
 				await self.close(code=403, reason=error)
 			elif user:
 				self.scope['user_id'] = user.get('user_id')
@@ -150,7 +150,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				await self.send(
 					text_data=json.dumps(
 						{
-							'ACK': PLAYCOMMANDS.ACK_S2C_CONNECT.value,
+							'ACK': PLAYCOMMANDS.S2C_CONNECT.value,
 						}
 					)
 				)
@@ -158,17 +158,13 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				logger.error('WebSocket connection failed: Authorization header missing')
 				await self.close(code=401, reason='Authorization header missing')
 		except Exception as e:
-			await self.send(
-				text_data=json.dumps(
-					{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': f'Error during WebSocket connection: {e}'}
-				)
-			)
 			logger.error(f'Error during WebSocket connection: {e}', exc_info=True)
 			await self.close(code=500, reason='Internal Server Error')
 
 	async def disconnect(self, close_code):
 		try:
 			if hasattr(self, 'playground_agent'):
+				self.playground_agent.agent.stop()  # type:ignore
 				await self.playground_agent.stop_browser_session()
 				logger.info('Browser session stopped successfully.')
 			else:
@@ -184,12 +180,12 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 
 			logger.info(f'Received data: {data}')
 
-			await COMMAND_HANDLER(self, data)
+			asyncio.create_task(COMMAND_HANDLER(self, data))
 
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
 			)
 
 	async def send_frame(self, event):

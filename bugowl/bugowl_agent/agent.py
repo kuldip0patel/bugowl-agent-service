@@ -29,7 +29,7 @@ class PlayGroundTask:
 	A simple task class to encapsulate task-related data.
 	"""
 
-	def __init__(self, uuid, title, data=None):
+	def __init__(self, uuid, title, data={}):
 		self.uuid = uuid
 		self.title = title
 		self.test_data = data
@@ -473,7 +473,8 @@ class AgentManager:
 		if not self.agent:
 			self.logger.info(f'Sensitive data: {sensitive_data}')
 			self.check_job_cancelled('run_task')
-			self.agent = Agent(
+			self.agent = await asyncio.to_thread(
+				Agent,
 				task=task,  # type: ignore
 				task_id=self.task_id,
 				llm=self.llm,
@@ -491,7 +492,7 @@ class AgentManager:
 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
 			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
 			self.check_job_cancelled('run_task')
-			self.agent.add_new_task(task)
+			await asyncio.to_thread(self.agent.add_new_task, task)
 
 		history = await self.agent.run()
 		output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
@@ -602,7 +603,7 @@ class PlayGroundAgentManager(AgentManager):
 			task = PlayGroundTask(
 				uuid=task_info.get('uuid'),
 				title=task_info.get('title'),
-				data=task_info.get('data'),
+				# data=task_info.get('data'),
 			)
 			tasks.append(task)
 		self.playground_task_list = tasks
@@ -621,204 +622,89 @@ class PlayGroundAgentManager(AgentManager):
 		self.logger.error(f'Task with UUID {uuid} not found.')
 		return None
 
+	# def execute_tasks(self):
+	# 	"""
+	# 	Execute the tasks that have been added to the execution list.
+	# 	"""
+	# 	if not self.playground_task_to_execute:
+	# 		self.logger.warning('No tasks to execute in the playground.')
+	# 		return
 
-# class PlayGroundAgent:
-# 	def _setup_logger(self):
-# 		"""
-# 		Set up a custom logger for the AgentManager class with colored logs.
-# 		"""
+	# 	self.logger.info('Executing tasks...')
+	# 	run_results = {}
+	# 	try:
+	# 		for task in self.playground_task_to_execute:
+	# 			self.logger.info(f'Executing Task: {task}')
+	# 			history, output = asyncio.run(self.run_task(task.title, sensitive_data=task.test_data))
+	# 			self.logger.info(f'Task Result: {output}')
+	# 			run_results[task] = output
 
-# 		self.logger = logging.getLogger('PlayGroundAgent')
-# 		self.logger.setLevel(logging.DEBUG)
+	# 			if not history.is_successful():
+	# 				self.logger.error(f'Task {task} failed.')
+	# 				return run_results, f'{task} - FAILED'
 
-# 		self.logger.propagate = False
+	# 		self.logger.info('All tasks executed successfully.')
+	# 		return run_results, 'All tasks - SUCCESSFUL'
 
-# 		# Create a colored formatter
-# 		coloredlogs.install(
-# 			level='DEBUG',
-# 			logger=self.logger,
-# 			fmt='%(asctime)s [%(name)s] - [%(levelname)s] %(pathname)s:%(lineno)d - %(funcName)s: %(message)s',
-# 			level_styles={
-# 				'debug': {'color': 'cyan'},
-# 				'info': {'color': 'green'},
-# 				'warning': {'color': 'yellow'},
-# 				'error': {'color': 'red'},
-# 				'critical': {'color': 'red', 'bold': True},
-# 			},
-# 			field_styles={
-# 				'asctime': {'color': 'white'},
-# 				'levelname': {'color': 'white', 'bold': True},
-# 				'pathname': {'color': 'blue'},
-# 				'lineno': {'color': 'blue'},
-# 				'funcName': {'color': 'blue'},
-# 			},
-# 			isatty=True,
-# 			force_color=True,
-# 		)
+	# 	except Exception as e:
+	# 		self.logger.error(f'Error executing tasks: {e}', exc_info=True)
+	# 		raise
 
-# 	def __init__(
-# 		self,
-# 		task_id,
-# 		llm_model=None,
-# 		enable_memory=True,
-# 		save_conversation_path='logs/playground/conversation',
-# 		use_vision=True,
-# 		cloud_sync=None,
-# 		use_thinking=False,
-# 		highlight_elements=False,
-# 		headless=True,
-# 	):
-# 		"""
-# 		Initialize the PlayGroundAgent with default or user-provided configurations.
-# 		"""
+	# async def add_task_to_execute(self, task_uuid_list):
+	# 	"""
+	# 	Add a task to the list of tasks to execute.
+	# 	"""
+	# 	for task_uuid in task_uuid_list:
+	# 		if task_uuid is None:
+	# 			self.logger.error('Task UUID is None. Cannot add to execution list.')
+	# 			return False
+	# 		task = await self.get_task(task_uuid)
+	# 		if not task:
+	# 			self.logger.error(f'Task with UUID {task_uuid} not found.')
+	# 			return False
+	# 		self.playground_task_to_execute.append(task)
+	# 		self.logger.info(f'Task {task.title} added to execution list.')
 
-# 		self._setup_logger()
-# 		self.logger.info('Initializing PlayGroundAgent...')
+	# async def pause_execution(self):
+	# 	"""
+	# 	Pause the execution of tasks.
+	# 	"""
+	# 	if self.paused and self.execution:
+	# 		self.logger.warning('Execution is already paused.')
+	# 		return False
+	# 	elif not self.execution:
+	# 		self.logger.error('Execution has not started yet. Cannot pause.')
+	# 		self.paused = False
+	# 		return False
+	# 	self.paused = True
+	# 	self.logger.info('Execution paused.')
+	# 	return True
 
-# 		if llm_model is None:
-# 			llm_model = os.getenv('LLM_MODEL', 'gemini-2.5-flash')
-# 		self.logger.info('Using LLM model: %s', llm_model)
+	# async def resume_execution(self):
+	# 	"""
+	# 	Resume the execution of tasks.
+	# 	"""
+	# 	if not self.paused and self.execution:
+	# 		self.logger.warning('Execution is not paused. Cannot resume.')
+	# 		return False
+	# 	elif not self.execution:
+	# 		self.logger.error('Execution has not started yet. Cannot resume.')
+	# 		self.paused = False
+	# 		return False
+	# 	self.paused = False
+	# 	self.logger.info('Execution resumed.')
+	# 	return True
 
-# 		self.llm_model = llm_model
-# 		self.llm = get_llm_model(llm_model)
-# 		self.save_conversation_path = save_conversation_path
-# 		self.headless = headless
-# 		self.highlight_elements = highlight_elements
-# 		self.browser_session = None
-# 		self.agent = None
-# 		self.task_id = task_id
-# 		self.enable_memory = enable_memory
-# 		self.save_conversation_path = save_conversation_path
-# 		self.use_vision = use_vision
-# 		self.sensitive_data = None
-# 		self.cloud_sync = cloud_sync
-# 		self.use_thinking = use_thinking
-# 		self.task_lists = []
-
-# 	def get_chrome_args(self):
-# 		"""
-# 		Get Chrome arguments optimized for automation.
-# 		"""
-# 		return CHROME_ARGS
-
-# 	def configure_browser(self):
-# 		"""
-# 		Configure the browser profile for the session.
-# 		"""
-# 		self.logger.info('Configuring browser profile...')
-# 		screen_size = get_display_size() or {'width': 1920, 'height': 1080}
-# 		browser_profile = BrowserProfile(
-# 			viewport=None,
-# 			keep_alive=True,
-# 			headless=self.headless,
-# 			disable_security=False,
-# 			highlight_elements=self.highlight_elements,
-# 			window_size=screen_size,
-# 			user_data_dir=f'/app/bugowl/browser_profiles/{uuid.uuid4()}',
-# 			args=self.get_chrome_args(),
-# 		)
-# 		self.browser_session = BrowserSession(browser_profile=browser_profile)
-# 		self.logger.info('Browser session configured.')
-
-# 	async def start_browser_session(self):
-# 		"""
-# 		Start the browser session.
-# 		"""
-# 		if not self.browser_session:
-# 			self.configure_browser()
-# 		await self.browser_session.start()  # type: ignore
-
-# 		self.logger.info('Browser session started.')
-
-# 		if self.browser_session:
-# 			if self.browser_session.browser_context and self.browser_session.browser_context.pages[0]:
-# 				self.browser_session.logger.info('BUGOWL:LOADING DVD ANIMATION')
-# 				await self.browser_session._show_dvd_screensaver_loading_animation(self.browser_session.browser_context.pages[0])
-# 			else:
-# 				self.browser_session.logger.info('BUGOWL:FAILED to load DVD ANIMATION')
-
-# 	async def stop_browser_session(self):
-# 		"""
-# 		Stop the browser session.
-# 		"""
-# 		if self.browser_session:
-# 			await self.browser_session.kill()
-# 			self.browser_session = None
-# 			self.logger.info('Browser session stopped.')
-
-# 	async def run_task(self, task, sensitive_data={}):
-# 		"""
-# 		Run a single task using the Agent.
-# 		"""
-# 		if not self.agent:
-# 			self.logger.info(f'Sensitive data: {sensitive_data}')
-# 			self.agent = Agent(
-# 				task=task,
-# 				task_id=self.task_id,
-# 				llm=self.llm,
-# 				browser_session=self.browser_session,
-# 				enable_memory=self.enable_memory,
-# 				save_conversation_path=self.save_conversation_path,
-# 				use_vision=self.use_vision,
-# 				sensitive_data=sensitive_data,
-# 				cloud_sync=self.cloud_sync,
-# 				use_thinking=self.use_thinking,
-# 				file_system_path=f'/app/bugowl/browser_data/playground/browser_user_agent{self.task_id}-{str(uuid.uuid4())}/',
-# 			)
-# 		else:
-# 			if len(sensitive_data) > 0:
-# 				self.agent.sensitive_data.update(sensitive_data)  # type: ignore
-# 			self.logger.info(f'Updated sensitive data: {self.agent.sensitive_data}')  # type: ignore
-# 			self.agent.add_new_task(task)
-
-# 		history = await self.agent.run()
-# 		output = '✅ SUCCESSFUL' if history.is_successful() else '❌ FAILED!'
-
-# 		return history, output
-
-# 	async def run_all_tasks(self):
-# 		"""
-# 		Run all tasks in the playground.
-# 		"""
-# 		if not self.browser_session:
-# 			await self.start_browser_session()
-# 			self.logger.info('New Browser session is ready for task execution...')
-# 		else:
-# 			await self.stop_browser_session()
-# 			self.logger.info('Browser session stopped. Starting new browser session for task execution...')
-# 			await self.start_browser_session()
-# 			self.logger.info('New Browser session is ready for task execution...')
-
-# 		run_results = {}
-# 		try:
-# 			for task in self.task_lists:
-# 				self.logger.info(f'Executing Task: {task}')
-# 				history, output = await self.run_task(task.title, sensitive_data=task.test_data)
-# 				self.logger.info(f'Task Result: {output}')
-# 				run_results[task] = output
-
-# 				if not history.is_successful():
-# 					self.logger.error(f'Task {task} failed.')
-# 					return run_results, f'{task} - FAILED'
-
-# 			self.logger.info('All tasks executed successfully.')
-# 			return run_results, 'All tasks - SUCCESSFUL'
-
-# 		except Exception as e:
-# 			self.logger.error(f'Error running tasks: {e}', exc_info=True)
-# 			raise
-
-# 	async def load_tasks(self, tasks_data):
-# 		"""
-# 		Load tasks with the given data.
-# 		"""
-# 		tasks = []
-# 		for task_info in tasks_data:
-# 			task = PlayGroundTask(
-# 				uuid=task_info.get('uuid'),
-# 				title=task_info.get('title'),
-# 				data=task_info.get('data'),
-# 			)
-# 			tasks.append(task)
-# 		self.task_lists = tasks
-# 		self.logger.info('Tasks loaded')
+	# async def stop_execution(self):
+	# 	"""
+	# 	Stop the execution of tasks.
+	# 	"""
+	# 	if not self.execution:
+	# 		self.logger.error('Execution has not started yet. Cannot stop.')
+	# 		return False
+	# 	self.execution = False
+	# 	self.paused = False
+	# 	self.playground_task_to_execute = []
+	# 	self.playground_task_list = []
+	# 	self.logger.info('Execution stopped.')
+	# 	return True
