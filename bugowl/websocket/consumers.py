@@ -1,10 +1,8 @@
 import asyncio
 import json
 import logging
-import os
 import uuid
 
-import redis.asyncio as aioredis
 from bugowl_agent.agent import PlayGroundAgentManager
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
@@ -60,11 +58,11 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 
 		if data.get('COMMAND') != PLAYCOMMANDS.C2S_CONNECT.value:
 			logger.error(f'Invalid command received: {data.get("COMMAND")}')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Invalid command'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Invalid command'}))
 			return
 		if not data.get('JOB_UUID'):
 			logger.error('Job UUID is required')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'Job UUID is required'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Job UUID is required'}))
 			return
 
 		if data.get('COMMAND') == PLAYCOMMANDS.C2S_CONNECT.value:
@@ -79,7 +77,7 @@ class AgentLiveStreamingSocketConsumer(AsyncWebsocketConsumer):
 			else:
 				logger.info(f'Already connected to group {self.group_name}, skipping group add')
 
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_CONNECT.value, 'job_uuid': self.job_uuid}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_CONNECT.value, 'job_uuid': self.job_uuid}))
 
 	async def send_frame(self, event):
 		frame_data = event.get('frame', None)
@@ -148,13 +146,11 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					record_video_dir=None,
 				)
 				await self.playground_agent.start_browser_session()
-				self.agent_task_id = str(uuid.uuid4())
-				self.redis = aioredis.from_url(os.getenv('DJANGO_CACHE_LOCATION', ''), decode_responses=True)
 				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
 				await self.send(
 					text_data=json.dumps(
 						{
-							'ACK': PLAYCOMMANDS.ACK_S2C_CONNECT.value,
+							'ACK': PLAYCOMMANDS.S2C_CONNECT.value,
 						}
 					)
 				)
@@ -189,7 +185,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
 			)
 
 	async def send_frame(self, event):

@@ -14,7 +14,7 @@ async def LOAD_TASK(self, data):
 	"""
 	try:
 		await self.playground_agent.load_tasks(data)
-		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'Task loaded successfully'}))
+		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_OK.value, 'message': 'Task loaded successfully'}))
 	except Exception as e:
 		raise
 
@@ -26,9 +26,7 @@ async def EXECUTE_ALL_TASKS(self, data):
 	try:
 		await self.playground_agent.load_tasks(data)
 		await self.playground_agent.run_all_tasks()
-		await self.send(
-			text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'All tasks executed successfully'})
-		)
+		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_OK.value, 'message': 'All tasks executed successfully'}))
 	except Exception as e:
 		raise
 
@@ -42,7 +40,7 @@ async def EXECUTE_TASK(self, data, uuid):
 		task = await self.playground_agent.get_task(uuid)
 
 		await self.playground_agent.run_task(task.title, {})
-		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_OK.value, 'message': 'Task executed successfully'}))
+		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_OK.value, 'message': 'Task executed successfully'}))
 	except Exception as e:
 		raise
 
@@ -56,28 +54,28 @@ async def COMMAND_HANDLER(self, data):
 		if not data.get('COMMAND'):
 			logger.warning('No COMMANDS found in received data')
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No COMMANDS found in received data'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No COMMANDS found in received data'})
 			)
 			return
 
-		elif data['COMMAND'] == PLAYCOMMANDS.LOAD_TASK.value:
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_LOAD_TASK.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 			else:
 				logger.info('Processing LOAD_TASK command')
 				await LOAD_TASK(self, data['ALL_TASK_DATA'])
 
-		elif data['COMMAND'] == PLAYCOMMANDS.EXECUTE_ALL_TASKS.value:
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_EXECUTE_ALL_TASKS.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 			else:
@@ -88,7 +86,7 @@ async def COMMAND_HANDLER(self, data):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 				return
@@ -96,7 +94,7 @@ async def COMMAND_HANDLER(self, data):
 				logger.error('No TASK_UUID provided for EXECUTE_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.ACK_S2C_ERROR.value, 'error': 'No TASK_UUID provided for EXECUTE_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No TASK_UUID provided for EXECUTE_TASK command'}
 					)
 				)
 				return
@@ -110,7 +108,9 @@ async def COMMAND_HANDLER(self, data):
 			self.playground_agent.agent.resume()
 		else:
 			logger.error(f'Unknown command received: {data["COMMAND"]}')
-			await self.send(text_data=json.dumps({'ACK': 'S2C_ERROR', 'error': f'Unknown command: {data["COMMAND"]}'}))
+			await self.send(
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Unknown command: {data["COMMAND"]}'})
+			)
 
 	except Exception as e:
 		raise
