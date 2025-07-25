@@ -43,6 +43,15 @@ const Playground = () => {
           task_status: data.task_status || ''
         });
       }
+
+      // Update task status based on received data
+      const updatedTasks = tasks.map(task => {
+        if (task.uuid === data.task_uuid) {
+          return { ...task, status: data.task_status };
+        }
+        return task;
+      });
+      setTasks(updatedTasks);
     } catch (error) {
       console.error('Error parsing WebSocket message:', error);
     }
@@ -159,10 +168,11 @@ const Playground = () => {
     const newTask = {
       uuid: uuidv4(),
       title: `Task ${tasks.length + 1}`,
-      data: null
+      data: null,
+      status: 'Pending' // Add a default status
     };
     
-    setTasks([...tasks, newTask]);
+    setTasks((prevTasks) => [...prevTasks, newTask]); // Use functional update to avoid overwriting
     if (!selectedTaskUuid) {
       setSelectedTaskUuid(newTask.uuid);
     }
