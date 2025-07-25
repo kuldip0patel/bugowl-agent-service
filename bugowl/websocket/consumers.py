@@ -164,8 +164,10 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 	async def disconnect(self, close_code):
 		try:
 			if hasattr(self, 'playground_agent'):
-				self.playground_agent.agent.stop()  # type:ignore
-				await self.playground_agent.stop_browser_session()
+				if self.playground_agent:
+					if self.playground_agent.agent:
+						self.playground_agent.agent.stop()  # type:ignore
+					await self.playground_agent.stop_browser_session()
 				logger.info('Browser session stopped successfully.')
 			else:
 				logger.warning('WebSocket disconnect called without playground_agent set')

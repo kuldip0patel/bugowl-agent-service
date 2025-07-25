@@ -285,7 +285,7 @@ CHANNEL_LAYERS = {
 					'password': os.getenv('REDIS_AUTH_TOKEN', None),  # Optional: Redis authentication token
 				}
 			],
-			'expiry': 60,
+			'expiry': 7200,
 			'group_expiry': 86400,  # Optional: Group expiry time in seconds
 		},
 	}

@@ -417,7 +417,7 @@ def generate_agent_JWT_token(source='agent'):
 		raise ValueError('AGENT_SERVER_SECRET_KEY is not set in the environment variables.')
 
 	issuer = 'agent-BugOwl'  # Set the issuer (you can customize this)
-	expiration_time = datetime.now(timezone.utc) + timedelta(minutes=10)  # Token valid for 10 minutes
+	expiration_time = datetime.now(timezone.utc) + timedelta(minutes=120)  # Token valid for 60 minutes
 	issued_at = datetime.now(timezone.utc)
 
 	payload = {
