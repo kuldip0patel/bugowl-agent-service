@@ -245,6 +245,7 @@ const Playground = () => {
           <button onClick={() => sendCommand('C2S_STOP')} disabled={!isConnected}>C2S_STOP</button>
           <button onClick={() => sendCommand('C2S_PAUSE')} disabled={!isConnected}>C2S_PAUSE</button>
           <button onClick={() => sendCommand('C2S_RESUME')} disabled={!isConnected}>C2S_RESUME</button>
+          <button onClick={() => sendCommand('C2S_RESTART')} disabled={!isConnected}>C2S_RESTART</button>
         </div>
       </div>
 
