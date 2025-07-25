@@ -117,6 +117,11 @@ class LiveStreaming:
 							self.test_case_run.status if hasattr(self, 'test_case_run') and self.test_case_run else None
 						),
 					}
+					if hasattr(self.agent_manager, 'task') and self.agent_manager.task:  # type:ignore
+						payload['task_uuid'] = str(self.agent_manager.task.uuid)  # type:ignore
+						payload['task_title'] = self.agent_manager.task.title  # type:ignore
+						payload['task_status'] = self.agent_manager.task.status  # type:ignore
+
 					if group_name:
 						await self.channel_layer.group_send(
 							group_name,

@@ -43,6 +43,15 @@ const Playground = () => {
           task_status: data.task_status || ''
         });
       }
+
+      // Update task status based on received data
+      const updatedTasks = tasks.map(task => {
+        if (task.uuid === data.task_uuid) {
+          return { ...task, status: data.task_status };
+        }
+        return task;
+      });
+      setTasks(updatedTasks);
     } catch (error) {
       console.error('Error parsing WebSocket message:', error);
     }
@@ -159,10 +168,11 @@ const Playground = () => {
     const newTask = {
       uuid: uuidv4(),
       title: `Task ${tasks.length + 1}`,
-      data: null
+      data: null,
+      status: 'Pending' // Add a default status
     };
     
-    setTasks([...tasks, newTask]);
+    setTasks((prevTasks) => [...prevTasks, newTask]); // Use functional update to avoid overwriting
     if (!selectedTaskUuid) {
       setSelectedTaskUuid(newTask.uuid);
     }
@@ -245,6 +255,7 @@ const Playground = () => {
           <button onClick={() => sendCommand('C2S_STOP')} disabled={!isConnected}>C2S_STOP</button>
           <button onClick={() => sendCommand('C2S_PAUSE')} disabled={!isConnected}>C2S_PAUSE</button>
           <button onClick={() => sendCommand('C2S_RESUME')} disabled={!isConnected}>C2S_RESUME</button>
+          <button onClick={() => sendCommand('C2S_RESTART')} disabled={!isConnected}>C2S_RESTART</button>
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -11,7 +12,7 @@ from job.helpers import get_cancel_job_status_cache
 from job.utils import get_cancel_cache_key
 from testask.serializers import TestTaskRunSerializer
 from testcase.serializers import TestCaseRunSerializer
-from websocket.utils import get_job_streaming_group_name
+from websocket.utils import PLAYCOMMANDS, get_job_streaming_group_name
 
 from browser_use import Agent
 from browser_use.browser import BrowserProfile
@@ -33,6 +34,7 @@ class PlayGroundTask:
 		self.uuid = uuid
 		self.title = title
 		self.test_data = data
+		self.status = None
 
 	def __str__(self):
 		return f'Task(uuid={self.uuid}, title={self.title})'
@@ -556,9 +558,33 @@ class PlayGroundAgentManager(AgentManager):
 		self.task_id = task_id
 		self.playground_task_list = []
 		self.channel_name = channel_name
+		self.execution = False
+		self.paused = False
+		self.stopped = False
+		self.task = None
 		self.logger.info('PlaygroundAgentManager initialized successfully.')
 
-	async def run_all_tasks(self):
+	async def run_task(self, task):
+		"""
+		Run a single task in the playground.
+		"""
+		try:
+			self.execution = True
+			self.logger.info(f'Running task: {task}')
+			self.task = task
+			self.task.status = JobStatusEnum.RUNNING.value
+			history, output = await super().run_task(self.task.title, sensitive_data=self.task.test_data or {})
+			self.logger.info(f'Task Result: {output}')
+			self.task.status = JobStatusEnum.PASS_.value if history.is_successful() else JobStatusEnum.FAILED.value
+			self.execution = False
+			await asyncio.sleep(1)  # Allow time for the socket to send the message
+			return history, output
+		except Exception as e:
+			self.logger.error(f'Error running task {task}: {e}', exc_info=True)
+			self.execution = False
+			raise
+
+	async def run_all_tasks(self, socket_sender):
 		"""
 		Run all tasks in the playground.
 		"""
@@ -573,25 +599,57 @@ class PlayGroundAgentManager(AgentManager):
 
 		if not (self.playground_task_list or self.task_id):
 			self.logger.warning('No tasks found in the playground.')
-			return
-
+			return False, ''
+		self.execution = True
+		self.logger.info('Starting task execution in the playground...')
 		run_results = {}
 		try:
 			for task in self.playground_task_list:
 				self.logger.info(f'Executing Task: {task}')
-				history, output = await self.run_task(task.title, sensitive_data=task.test_data)
-				self.logger.info(f'Task Result: {output}')
-				run_results[task] = output
+				task.status = JobStatusEnum.RUNNING.value
+				self.task = task
+				if socket_sender:
+					await socket_sender(
+						text_data=json.dumps(
+							{
+								'ACK': PLAYCOMMANDS.S2C_TASK_STATUS.value,
+								'task_uuid': str(self.task.uuid),
+								'task_title': self.task.title,
+								'task_status': self.task.status,
+							}
+						)
+					)
 
+				history, output = await super().run_task(self.task.title, self.task.test_data or {})
+				self.logger.info(f'Task Result: {output}')
+				run_results[str(task.uuid)] = output
+
+				self.task.status = JobStatusEnum.PASS_.value if history.is_successful() else JobStatusEnum.FAILED.value
+
+				if socket_sender:
+					await socket_sender(
+						text_data=json.dumps(
+							{
+								'ACK': PLAYCOMMANDS.S2C_TASK_STATUS.value,
+								'task_uuid': str(self.task.uuid),
+								'task_title': self.task.title,
+								'task_status': self.task.status,
+							}
+						)
+					)
+				await asyncio.sleep(1)  # Allow time for the socket to send the message
 				if not history.is_successful():
 					self.logger.error(f'Task {task} failed.')
+					self.execution = False
 					return run_results, f'{task} - FAILED'
 
 			self.logger.info('All tasks executed successfully.')
+			self.execution = False
 			return run_results, 'All tasks - SUCCESSFUL'
 
 		except Exception as e:
 			self.logger.error(f'Error running tasks: {e}', exc_info=True)
+			self.execution = False
 			raise
 
 	async def load_tasks(self, tasks_data):
@@ -621,6 +679,98 @@ class PlayGroundAgentManager(AgentManager):
 				return task
 		self.logger.error(f'Task with UUID {uuid} not found.')
 		return None
+
+	async def stop(self):
+		"""
+		Stop the playground agent and clean up resources.
+		"""
+		try:
+			if not self.execution:
+				self.logger.warning('PlaygroundAgentManager is not running. Nothing to stop.')
+				return False
+			self.logger.info('Stopping PlaygroundAgentManager...')
+
+			if not self.agent:
+				self.logger.warning('No agent found to stop.')
+				return False
+			self.agent.stop()
+			self.execution = False
+			self.paused = False
+			self.stopped = True
+			self.logger.info('PlaygroundAgentManager stopped successfully.')
+			return True
+		except Exception as e:
+			self.logger.error(f'Error stopping PlaygroundAgentManager: {e}', exc_info=True)
+			return False
+
+	async def pause(self):
+		"""
+		Pause the execution of tasks in the playground.
+		"""
+		if not self.execution:
+			self.logger.error('PlaygroundAgentManager has not started yet. Cannot pause.')
+			return False
+		if self.paused:
+			self.logger.warning('PlaygroundAgentManager is already paused.')
+			return False
+		if not self.agent:
+			self.logger.warning('No agent found to pause.')
+			return False
+		try:
+			self.agent.pause()
+			self.paused = True
+			self.logger.info('PlaygroundAgentManager paused.')
+			return True
+		except Exception as e:
+			self.logger.error(f'Error pausing PlaygroundAgentManager: {e}', exc_info=True)
+			return False
+
+	async def resume(self):
+		"""
+		Resume the execution of tasks in the playground.
+		"""
+		if not self.execution:
+			self.logger.error('PlaygroundAgentManager has not started yet. Cannot resume.')
+			return False
+		if not self.paused:
+			self.logger.warning('PlaygroundAgentManager is not paused. Cannot resume.')
+			return False
+		if not self.agent:
+			self.logger.warning('No agent found to resume.')
+			return False
+		try:
+			self.agent.resume()
+			self.paused = False
+			self.logger.info('PlaygroundAgentManager resumed.')
+			return True
+		except Exception as e:
+			self.logger.error(f'Error resuming PlaygroundAgentManager: {e}', exc_info=True)
+			return False
+
+	async def restart(self):
+		"""
+		Restart the PlaygroundAgentManager.
+		"""
+		if self.execution:
+			self.logger.warning('PlaygroundAgentManager is already running. Cannot restart.')
+			return False
+		if self.paused:
+			self.logger.warning('PlaygroundAgentManager is paused. Cannot restart.')
+			return False
+		if not self.agent:
+			self.logger.warning('No agent found to restart.')
+			return False
+		if not self.stopped:
+			self.logger.warning('PlaygroundAgentManager is not stopped. Cannot restart.')
+			return False
+		try:
+			self.stopped = False
+			self.agent.state.stopped = False
+			self.logger.info('PlaygroundAgentManager restarted successfully.')
+			return True
+		except Exception as e:
+			self.logger.error(f'Error restarting PlaygroundAgentManager: {e}', exc_info=True)
+			return False
 
 	# def execute_tasks(self):
 	# 	"""

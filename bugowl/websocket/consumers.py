@@ -197,6 +197,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		case_uuid = event.get('case_uuid', None)
 		case_status = event.get('case_status', None)
 		task_uuid = event.get('task_uuid', None)
+		task_title = event.get('task_title', None)
 		task_status = event.get('task_status', None)
 		current_url = event.get('current_url', None)
 		if not frame_data:
@@ -215,6 +216,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 						'case_uuid': case_uuid,
 						'case_status': case_status,
 						'task_uuid': task_uuid,
+						'task_title': task_title,
 						'task_status': task_status,
 					}
 				)
