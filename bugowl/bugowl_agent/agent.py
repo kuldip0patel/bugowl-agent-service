@@ -687,21 +687,20 @@ class PlayGroundAgentManager(AgentManager):
 		try:
 			if not self.execution:
 				self.logger.warning('PlaygroundAgentManager is not running. Nothing to stop.')
-				return False
+				return False , 'Agent is not running.'
 			self.logger.info('Stopping PlaygroundAgentManager...')
-
 			if not self.agent:
 				self.logger.warning('No agent found to stop.')
-				return False
+				return False , 'No agent found to stop.'
 			self.agent.stop()
 			self.execution = False
 			self.paused = False
 			self.stopped = True
 			self.logger.info('PlaygroundAgentManager stopped successfully.')
-			return True
+			return True , 'Agent stopped successfully.'
 		except Exception as e:
 			self.logger.error(f'Error stopping PlaygroundAgentManager: {e}', exc_info=True)
-			return False
+			return False , 'Error stopping Agent.'
 
 	async def pause(self):
 		"""
@@ -709,21 +708,21 @@ class PlayGroundAgentManager(AgentManager):
 		"""
 		if not self.execution:
 			self.logger.error('PlaygroundAgentManager has not started yet. Cannot pause.')
-			return False
+			return False , 'Agent has not started yet.'
 		if self.paused:
 			self.logger.warning('PlaygroundAgentManager is already paused.')
-			return False
+			return False , 'Agent is already paused.'
 		if not self.agent:
 			self.logger.warning('No agent found to pause.')
-			return False
+			return False , 'No agent found to pause.'
 		try:
 			self.agent.pause()
 			self.paused = True
 			self.logger.info('PlaygroundAgentManager paused.')
-			return True
+			return True , 'Agent paused successfully.'
 		except Exception as e:
 			self.logger.error(f'Error pausing PlaygroundAgentManager: {e}', exc_info=True)
-			return False
+			return False , 'Error pausing Agent.'
 
 	async def resume(self):
 		"""
@@ -731,21 +730,21 @@ class PlayGroundAgentManager(AgentManager):
 		"""
 		if not self.execution:
 			self.logger.error('PlaygroundAgentManager has not started yet. Cannot resume.')
-			return False
+			return False , 'Agent has not started yet.'
 		if not self.paused:
 			self.logger.warning('PlaygroundAgentManager is not paused. Cannot resume.')
-			return False
+			return False , 'Agent is not paused.'
 		if not self.agent:
 			self.logger.warning('No agent found to resume.')
-			return False
+			return False , 'No agent found to resume.'
 		try:
 			self.agent.resume()
 			self.paused = False
 			self.logger.info('PlaygroundAgentManager resumed.')
-			return True
+			return True , 'Agent resumed successfully.'
 		except Exception as e:
 			self.logger.error(f'Error resuming PlaygroundAgentManager: {e}', exc_info=True)
-			return False
+			return False , 'Error resuming Agent.'
 
 	async def restart(self):
 		"""
@@ -753,24 +752,87 @@ class PlayGroundAgentManager(AgentManager):
 		"""
 		if self.execution:
 			self.logger.warning('PlaygroundAgentManager is already running. Cannot restart.')
-			return False
+			return False , 'Agent is already running.'
 		if self.paused:
 			self.logger.warning('PlaygroundAgentManager is paused. Cannot restart.')
-			return False
+			return False , 'Agent is paused.'
 		if not self.agent:
 			self.logger.warning('No agent found to restart.')
-			return False
+			return False , 'No agent found to restart.'
 		if not self.stopped:
 			self.logger.warning('PlaygroundAgentManager is not stopped. Cannot restart.')
-			return False
+			return False , 'Agent is not stopped. Cannot restart.'
 		try:
 			self.stopped = False
 			self.agent.state.stopped = False
 			self.logger.info('PlaygroundAgentManager restarted successfully.')
-			return True
+			return True , 'Agent restarted successfully.'
 		except Exception as e:
 			self.logger.error(f'Error restarting PlaygroundAgentManager: {e}', exc_info=True)
-			return False
+			return False , 'Error restarting Agent.'
+
+	async def go_back_page(self):
+		"""
+		Go back to the previous page in the browser session.
+		"""
+		if not self.browser_session or not self.browser_session.browser_context:
+			self.logger.error('Browser session is not initialized. Cannot go back.')
+			return False , 'Browser session is not initialized.'
+		if self.paused:
+			self.logger.warning('Cannot go back while the session is paused.')
+			return False , 'Session is paused.'
+		if self.execution:
+			self.logger.warning('Cannot go back while tasks are being executed.')
+			return False , 'Tasks are being executed.'
+		try:
+			await self.browser_session.go_back()
+			self.logger.info('Went back to the previous page successfully.')
+			return True , 'Went back to the previous page successfully.'
+		except Exception as e:
+			self.logger.error(f'Error going back in the browser: {e}', exc_info=True)
+			return False , 'Error going back in the browser.'
+
+	async def go_forward_page(self):
+		"""
+		Go forward to the next page in the browser session.
+		"""
+		if not self.browser_session or not self.browser_session.browser_context:
+			self.logger.error('Browser session is not initialized. Cannot go forward.')
+			return False , 'Browser session is not initialized.'
+		if self.paused:
+			self.logger.warning('Cannot go forward while the session is paused.')
+			return False , 'Session is paused.'
+		if self.execution:
+			self.logger.warning('Cannot go forward while tasks are being executed.')
+			return False , 'Tasks are being executed.'
+		try:
+			await self.browser_session.go_forward()
+			self.logger.info('Went forward to the next page successfully.')
+			return True , 'Went forward to the next page successfully.'
+		except Exception as e:
+			self.logger.error(f'Error going forward in the browser: {e}', exc_info=True)
+			return False , 'Error going forward in the browser.'
+
+	async def reload_page(self):
+		"""
+		Reload the current page in the browser session.
+		"""
+		if not self.browser_session or not self.browser_session.browser_context:
+			self.logger.error('Browser session is not initialized. Cannot reload page.')
+			return False , 'Browser session is not initialized.'
+		if self.paused:
+			self.logger.warning('Cannot reload page while the session is paused.')
+			return False , 'Session is paused.'
+		if self.execution:
+			self.logger.warning('Cannot reload page while tasks are being executed.')
+			return False , 'Tasks are being executed.'
+		try:
+			await self.browser_session.refresh_page()
+			self.logger.info('Page reloaded successfully.')
+			return True , 'Page reloaded successfully.'
+		except Exception as e:
+			self.logger.error(f'Error reloading page: {e}', exc_info=True)
+			return False , 'Error reloading page.'
 
 	# def execute_tasks(self):
 	# 	"""
