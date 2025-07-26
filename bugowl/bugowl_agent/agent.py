@@ -692,10 +692,12 @@ class PlayGroundAgentManager(AgentManager):
 
 			if playground_serializer.is_valid():
 				playground_serializer.save()
+				self.logger.info('Playground data saved successfully.')
 			else:
 				self.logger.error(f'Error saving playground data: {playground_serializer.errors}', exc_info=True)
 				return False, str(playground_serializer.errors)
 			self.logger.info('Tasks loaded')
+			return True, 'Tasks loaded successfully'
 		except Exception as e:
 			self.logger.error(f'Error loading tasks: {e}', exc_info=True)
 			return False, 'Error loading tasks'
