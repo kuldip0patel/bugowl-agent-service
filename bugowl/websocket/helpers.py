@@ -9,17 +9,6 @@ from .utils import PLAYCOMMANDS
 logger = logging.getLogger(settings.ENV)
 
 
-async def LOAD_TASK(self, data):
-	"""
-	Load a task based on the provided data.
-	"""
-	try:
-		await self.playground_agent.load_tasks(data)
-		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_OK.value, 'message': 'Task loaded successfully'}))
-	except Exception as e:
-		raise
-
-
 async def EXECUTE_ALL_TASKS(self, data):
 	"""
 	Execute all tasks in the current session.
@@ -115,7 +104,7 @@ async def COMMAND_HANDLER(self, data):
 			)
 			return
 
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_LOAD_TASK.value:
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RUN_ALL_TASKS.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
@@ -124,21 +113,9 @@ async def COMMAND_HANDLER(self, data):
 					)
 				)
 			else:
-				logger.info('Processing LOAD_TASK command')
-				await LOAD_TASK(self, data['ALL_TASK_DATA'])
-
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_EXECUTE_ALL_TASKS.value:
-			if not data.get('ALL_TASK_DATA'):
-				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
-				await self.send(
-					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
-					)
-				)
-			else:
-				logger.info('Processing EXECUTE_ALL_TASKS command')
+				logger.info('Processing RUN_ALL_TASKS command')
 				await EXECUTE_ALL_TASKS(self, data['ALL_TASK_DATA'])
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_EXECUTE_TASK.value:
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RUN_TASK.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
@@ -155,7 +132,7 @@ async def COMMAND_HANDLER(self, data):
 					)
 				)
 				return
-			logger.info('Processing EXECUTE_TASK command')
+			logger.info('Processing RUN_TASK command')
 			await EXECUTE_TASK(self, data['ALL_TASK_DATA'], data['TASK_UUID'])
 		elif data['COMMAND'] == PLAYCOMMANDS.C2S_STOP.value:
 			logger.info('Processing STOP command')
@@ -169,12 +146,6 @@ async def COMMAND_HANDLER(self, data):
 			logger.info('Processing RESUME command')
 			await self.playground_agent.resume()
 			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_RESUME.value, 'message': 'resumed successfully'}))
-
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RESTART.value:
-			logger.info('Processing RESTART command')
-			await self.playground_agent.restart()
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_RESTART.value, 'message': 'restarted successfully'}))
-
 		else:
 			logger.error(f'Unknown command received: {data["COMMAND"]}')
 			await self.send(

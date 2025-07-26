@@ -1652,7 +1652,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		if self.browser:
 			self.logger.info('🌎 Restarting/reconnecting to browser...')
 			loop = asyncio.get_event_loop()
-			loop.create_task(self.browser._init())  # type: ignore
+			# loop.create_task(self.browser._init())  # type: ignore # BUGOWL: Reinitializing browser session Not needed.
 			loop.create_task(asyncio.sleep(5))
 
 	def stop(self) -> None:
