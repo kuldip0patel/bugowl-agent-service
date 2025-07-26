@@ -11,5 +11,5 @@ class PlayGroundAdmin(admin.ModelAdmin):
 	Admin interface for PlayGround model.
 	"""
 
-	list_display = ('id', 'playground_uuid', 'data', 'created_at', 'updated_at')
+	list_display = ('id', 'playground_uuid', 'data', 'run_by', 'business', 'created_at', 'updated_at')
 	search_fields = ('playground_uuid',)

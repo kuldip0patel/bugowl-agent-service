@@ -654,7 +654,7 @@ class PlayGroundAgentManager(AgentManager):
 			self.execution = False
 			raise
 
-	def load_tasks(self, tasks_data):
+	def load_tasks(self, tasks_data, user_data, business_id):
 		"""
 		Load tasks with the given data.
 		"""
@@ -679,6 +679,8 @@ class PlayGroundAgentManager(AgentManager):
 			playground_data = {
 				'playground_uuid': self.task_id,
 				'data': playground_task_data,
+				'run_by': user_data,
+				'business': business_id,
 			}
 
 			playground = PlayGround.objects.filter(playground_uuid=self.task_id).first()

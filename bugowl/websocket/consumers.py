@@ -133,10 +133,13 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				logger.warning('WebSocket connection failed: %s', error)
 				await self.close(code=403, reason=error)
 			elif user:
-				self.scope['user_id'] = user.get('user_id')
-				self.scope['user_email'] = user.get('user_email')
-				self.scope['user_first_name'] = user.get('first_name')
-				self.scope['user_last_name'] = user.get('last_name')
+				self.user = {
+					'user_id': user.get('user_id'),
+					'user_email': user.get('user_email'),
+					'user_first_name': user.get('first_name'),
+					'user_last_name': user.get('last_name'),
+					'user_business': user.get('business'),
+				}
 				self.scope['user_business'] = user.get('business')
 
 				await self.accept()
@@ -147,7 +150,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					record_video_dir=None,
 				)
 				await self.playground_agent.start_browser_session()
-				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
+				logger.info('WebSocket connection established for user: %s', user.get('user_email'))
 				await self.send(
 					text_data=json.dumps(
 						{

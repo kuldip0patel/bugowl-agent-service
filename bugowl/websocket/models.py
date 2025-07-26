@@ -10,6 +10,8 @@ class PlayGround(models.Model):
 
 	playground_uuid = models.UUIDField(unique=True)
 	data = models.JSONField()  # JSON field to store playground data
+	run_by = models.JSONField()
+	business = models.IntegerField()
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 

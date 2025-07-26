@@ -31,7 +31,7 @@ async def EXECUTE_ALL_TASKS(self, data):
 			if not result:
 				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': response}))
 				return False
-		await sync_to_async(self.playground_agent.load_tasks)(data)
+		await sync_to_async(self.playground_agent.load_tasks)(data, self.user, self.scope['user_business'])
 		run_results, response = await self.playground_agent.run_all_tasks(self.send)
 		logger.info(f'run_results: {run_results}\n response: {response}')
 		await self.send(
@@ -70,7 +70,7 @@ async def EXECUTE_TASK(self, data, uuid):
 				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': response}))
 				return False
 
-		await sync_to_async(self.playground_agent.load_tasks)(data)
+		await sync_to_async(self.playground_agent.load_tasks)(data, self.user, self.scope['user_business'])
 		task = await self.playground_agent.get_task(uuid)
 		task.status = JobStatusEnum.RUNNING.value
 		await self.send(
@@ -121,7 +121,9 @@ async def COMMAND_HANDLER(self, data):
 				)
 			else:
 				logger.info('Processing LOAD_TASK command')
-				result, response = await sync_to_async(self.playground_agent.load_tasks)(data['ALL_TASK_DATA'])
+				result, response = await sync_to_async(self.playground_agent.load_tasks)(
+					data['ALL_TASK_DATA'], self.user, self.scope['user_business']
+				)
 				await self.send(
 					text_data=json.dumps(
 						{'ACK': PLAYCOMMANDS.S2C_LOAD_TASK.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
