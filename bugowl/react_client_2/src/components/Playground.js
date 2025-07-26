@@ -139,7 +139,7 @@ const Playground = () => {
       return;
     }
 
-    sendCommand('C2S_EXECUTE_ALL_TASKS', {
+    sendCommand('C2S_RUN_ALL_TASKS', {
       ALL_TASK_DATA: tasks.map(task => ({
         uuid: task.uuid,
         title: task.title,
@@ -154,7 +154,7 @@ const Playground = () => {
       return;
     }
 
-    sendCommand('C2S_EXECUTE_TASK', {
+    sendCommand('C2S_RUN_TASK', {
       TASK_UUID: selectedTaskUuid,
       ALL_TASK_DATA: tasks.map(task => ({
         uuid: task.uuid,
