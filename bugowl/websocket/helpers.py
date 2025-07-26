@@ -2,22 +2,12 @@ import json
 import logging
 
 from api.utils import JobStatusEnum
+from asgiref.sync import sync_to_async
 from django.conf import settings
 
 from .utils import PLAYCOMMANDS
 
 logger = logging.getLogger(settings.ENV)
-
-
-async def LOAD_TASK(self, data):
-	"""
-	Load a task based on the provided data.
-	"""
-	try:
-		await self.playground_agent.load_tasks(data)
-		await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_OK.value, 'message': 'Task loaded successfully'}))
-	except Exception as e:
-		raise
 
 
 async def EXECUTE_ALL_TASKS(self, data):
@@ -28,20 +18,20 @@ async def EXECUTE_ALL_TASKS(self, data):
 		if self.playground_agent.execution:
 			logger.warning('Tasks are already being executed. Please wait until the current execution is complete.')
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are already being executed.'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'Tasks are already being executed.'})
 			)
 			return False
 		if self.playground_agent.paused:
 			logger.warning('Tasks are paused. Please resume before executing new tasks.')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are paused.'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'Tasks are paused.'}))
 			return False
 		if self.playground_agent.stopped:
-			logger.error('PlaygroundAgentManager has been stopped. Cannot execute tasks.')
-			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'PlaygroundAgentManager has been stopped.'})
-			)
-			return False
-		await self.playground_agent.load_tasks(data)
+			logger.error('PlaygroundAgentManager has been stopped , restarting it to execute tasks.')
+			result, response = await self.playground_agent.restart()
+			if not result:
+				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': response}))
+				return False
+		await sync_to_async(self.playground_agent.load_tasks)(data, self.user, self.scope['user_business'])
 		run_results, response = await self.playground_agent.run_all_tasks(self.send)
 		logger.info(f'run_results: {run_results}\n response: {response}')
 		await self.send(
@@ -66,21 +56,21 @@ async def EXECUTE_TASK(self, data, uuid):
 		if self.playground_agent.execution:
 			logger.warning('Tasks are already being executed. Please wait until the current execution is complete.')
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are already being executed.'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'Tasks are already being executed.'})
 			)
 			return False
 		if self.playground_agent.paused:
 			logger.warning('Tasks are paused. Please resume before executing a new task.')
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are paused.'}))
+			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'Tasks are paused.'}))
 			return False
 		if self.playground_agent.stopped:
-			logger.error('PlaygroundAgentManager has been stopped. Cannot execute tasks.')
-			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'PlaygroundAgentManager has been stopped.'})
-			)
-			return False
+			logger.error('PlaygroundAgentManager has been stopped , restarting it to execute tasks.')
+			result, response = await self.playground_agent.restart()
+			if not result:
+				await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': response}))
+				return False
 
-		await self.playground_agent.load_tasks(data)
+		await sync_to_async(self.playground_agent.load_tasks)(data, self.user, self.scope['user_business'])
 		task = await self.playground_agent.get_task(uuid)
 		task.status = JobStatusEnum.RUNNING.value
 		await self.send(
@@ -117,7 +107,7 @@ async def COMMAND_HANDLER(self, data):
 		if not data.get('COMMAND'):
 			logger.warning('No COMMANDS found in received data')
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No COMMANDS found in received data'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'No COMMANDS found in received data'})
 			)
 			return
 
@@ -126,30 +116,38 @@ async def COMMAND_HANDLER(self, data):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 			else:
 				logger.info('Processing LOAD_TASK command')
-				await LOAD_TASK(self, data['ALL_TASK_DATA'])
+				result, response = await sync_to_async(self.playground_agent.load_tasks)(
+					data['ALL_TASK_DATA'], self.user, self.scope['user_business']
+				)
+				await self.send(
+					text_data=json.dumps(
+						{'ACK': PLAYCOMMANDS.S2C_LOAD_TASK.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+					)
+				)
 
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_EXECUTE_ALL_TASKS.value:
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RUN_ALL_TASKS.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 			else:
-				logger.info('Processing EXECUTE_ALL_TASKS command')
+				logger.info('Processing RUN_ALL_TASKS command')
 				await EXECUTE_ALL_TASKS(self, data['ALL_TASK_DATA'])
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_EXECUTE_TASK.value:
+
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RUN_TASK.value:
 			if not data.get('ALL_TASK_DATA'):
 				logger.error('No ALL_TASK_DATA provided for LOAD_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'No ALL_TASK_DATA provided for LOAD_TASK command'}
 					)
 				)
 				return
@@ -157,34 +155,71 @@ async def COMMAND_HANDLER(self, data):
 				logger.error('No TASK_UUID provided for EXECUTE_TASK command')
 				await self.send(
 					text_data=json.dumps(
-						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'No TASK_UUID provided for EXECUTE_TASK command'}
+						{'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': 'No TASK_UUID provided for EXECUTE_TASK command'}
 					)
 				)
 				return
-			logger.info('Processing EXECUTE_TASK command')
+			logger.info('Processing RUN_TASK command')
 			await EXECUTE_TASK(self, data['ALL_TASK_DATA'], data['TASK_UUID'])
+
 		elif data['COMMAND'] == PLAYCOMMANDS.C2S_STOP.value:
 			logger.info('Processing STOP command')
-			await self.playground_agent.stop()
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_STOP.value, 'message': 'stopped successfully'}))
+			result, response = await self.playground_agent.stop()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_STOP.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
+
 		elif data['COMMAND'] == PLAYCOMMANDS.C2S_PAUSE.value:
 			logger.info('Processing PAUSE command')
-			await self.playground_agent.pause()
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_PAUSE.value, 'message': 'paused successfully'}))
+			result, response = await self.playground_agent.pause()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_PAUSE.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
+
 		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RESUME.value:
 			logger.info('Processing RESUME command')
-			await self.playground_agent.resume()
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_RESUME.value, 'message': 'resumed successfully'}))
+			result, response = await self.playground_agent.resume()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_RESUME.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
 
-		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RESTART.value:
-			logger.info('Processing RESTART command')
-			await self.playground_agent.restart()
-			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_RESTART.value, 'message': 'restarted successfully'}))
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_RELOAD.value:
+			logger.info('Processing RELOAD command')
+			result, response = await self.playground_agent.reload_page()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_RELOAD.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
+
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_GO_BACK.value:
+			logger.info('Processing GO_BACK command')
+			result, response = await self.playground_agent.go_back_page()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_GO_BACK.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
+
+		elif data['COMMAND'] == PLAYCOMMANDS.C2S_GO_FORWARD.value:
+			logger.info('Processing GO_FORWARD command')
+			result, response = await self.playground_agent.go_forward_page()
+			await self.send(
+				text_data=json.dumps(
+					{'ACK': PLAYCOMMANDS.S2C_GO_FORWARD.value if result else PLAYCOMMANDS.S2C_ERROR.value, 'message': response}
+				)
+			)
 
 		else:
 			logger.error(f'Unknown command received: {data["COMMAND"]}')
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Unknown command: {data["COMMAND"]}'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': f'Unknown command: {data["COMMAND"]}'})
 			)
 
 	except Exception as e:

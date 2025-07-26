@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 
+from autobahn.exception import Disconnected
 from bugowl_agent.agent import PlayGroundAgentManager
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
@@ -132,10 +133,13 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 				logger.warning('WebSocket connection failed: %s', error)
 				await self.close(code=403, reason=error)
 			elif user:
-				self.scope['user_id'] = user.get('user_id')
-				self.scope['user_email'] = user.get('user_email')
-				self.scope['user_first_name'] = user.get('first_name')
-				self.scope['user_last_name'] = user.get('last_name')
+				self.user = {
+					'user_id': user.get('user_id'),
+					'user_email': user.get('user_email'),
+					'user_first_name': user.get('first_name'),
+					'user_last_name': user.get('last_name'),
+					'user_business': user.get('business'),
+				}
 				self.scope['user_business'] = user.get('business')
 
 				await self.accept()
@@ -146,7 +150,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					record_video_dir=None,
 				)
 				await self.playground_agent.start_browser_session()
-				logger.info('WebSocket connection established for user: %s', self.scope['user_email'])
+				logger.info('WebSocket connection established for user: %s', user.get('user_email'))
 				await self.send(
 					text_data=json.dumps(
 						{
@@ -165,8 +169,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		try:
 			if hasattr(self, 'playground_agent'):
 				if self.playground_agent:
-					if self.playground_agent.agent:
-						self.playground_agent.agent.stop()  # type:ignore
+					self.playground_agent.stop()  # type:ignore
 					await self.playground_agent.stop_browser_session()
 				logger.info('Browser session stopped successfully.')
 			else:
@@ -187,7 +190,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': f'Error processing received data: {e}'})
 			)
 
 	async def send_frame(self, event):
@@ -221,5 +224,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					}
 				)
 			)
+		except Disconnected as e:
+			logger.error(f'WebSocket connection closed while sending frame: {e}')
 		except Exception as e:
 			logger.error(f'Error sending frame: {e}', exc_info=True)
