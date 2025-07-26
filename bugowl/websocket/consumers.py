@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 
+from autobahn.exception import Disconnected
 from bugowl_agent.agent import PlayGroundAgentManager
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
@@ -165,8 +166,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		try:
 			if hasattr(self, 'playground_agent'):
 				if self.playground_agent:
-					if self.playground_agent.agent:
-						self.playground_agent.agent.stop()  # type:ignore
+					self.playground_agent.stop()  # type:ignore
 					await self.playground_agent.stop_browser_session()
 				logger.info('Browser session stopped successfully.')
 			else:
@@ -187,7 +187,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 		except Exception as e:
 			logger.error(f'Error processing received data: {e}', exc_info=True)
 			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': f'Error processing received data: {e}'})
+				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'message': f'Error processing received data: {e}'})
 			)
 
 	async def send_frame(self, event):
@@ -221,5 +221,7 @@ class AgentPlayGroundSocketConsumer(AsyncWebsocketConsumer):
 					}
 				)
 			)
+		except Disconnected as e:
+			logger.error(f'WebSocket connection closed while sending frame: {e}')
 		except Exception as e:
 			logger.error(f'Error sending frame: {e}', exc_info=True)
