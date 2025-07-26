@@ -36,11 +36,8 @@ async def EXECUTE_ALL_TASKS(self, data):
 			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are paused.'}))
 			return False
 		if self.playground_agent.stopped:
-			logger.error('PlaygroundAgentManager has been stopped. Cannot execute tasks.')
-			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'PlaygroundAgentManager has been stopped.'})
-			)
-			return False
+			logger.error('PlaygroundAgentManager has been stopped , restarting it to execute tasks.')
+			await self.playground_agent.restart()
 		await self.playground_agent.load_tasks(data)
 		run_results, response = await self.playground_agent.run_all_tasks(self.send)
 		logger.info(f'run_results: {run_results}\n response: {response}')
@@ -74,11 +71,8 @@ async def EXECUTE_TASK(self, data, uuid):
 			await self.send(text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'Tasks are paused.'}))
 			return False
 		if self.playground_agent.stopped:
-			logger.error('PlaygroundAgentManager has been stopped. Cannot execute tasks.')
-			await self.send(
-				text_data=json.dumps({'ACK': PLAYCOMMANDS.S2C_ERROR.value, 'error': 'PlaygroundAgentManager has been stopped.'})
-			)
-			return False
+			logger.error('PlaygroundAgentManager has been stopped , restarting it to execute tasks.')
+			await self.playground_agent.restart()
 
 		await self.playground_agent.load_tasks(data)
 		task = await self.playground_agent.get_task(uuid)
